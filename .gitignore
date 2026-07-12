@@ -1,0 +1,9 @@
+﻿[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+appsettings.Development.json
+appsettings.Production.json
+.env
+*.log
