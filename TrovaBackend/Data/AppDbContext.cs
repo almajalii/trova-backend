@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using TrovaAPI.Models;
+using TrovaBackend.Models;
 
-namespace TrovaAPI.Data;
+namespace TrovaBackend.Data;
 
 public class AppDbContext : DbContext
 {

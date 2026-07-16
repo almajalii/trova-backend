@@ -4,8 +4,8 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<RootNamespace>TrovaAPI</RootNamespace>
-		<AssemblyName>TrovaAPI</AssemblyName>
+		<RootNamespace>TrovaBackend</RootNamespace>
+		<AssemblyName>TrovaBackend</AssemblyName>
 	</PropertyGroup>
 
 	<ItemGroup>

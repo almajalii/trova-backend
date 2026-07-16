@@ -1,11 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using TrovaAPI.DTOs.Auth;
-using TrovaAPI.DTOs.Common;
-using TrovaAPI.Services.Auth;
+using TrovaBackend.DTOs.Auth;
+using TrovaBackend.DTOs.Common;
+using TrovaBackend.Services.Auth;
 
-namespace TrovaAPI.Controllers;
+namespace TrovaBackend.Controllers;
 
 [ApiController]
 [Route("api/auth")]

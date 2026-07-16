@@ -5,7 +5,7 @@ Lean .NET 9 Web API skeleton — Supabase (Postgres) via EF Core, JWT auth. Stru
 ## Structure
 
 ```
-TrovaAPI/
+TrovaBackend/
 ├── Controllers/       # HTTP endpoints
 ├── Services/           # Business logic (interface + implementation per feature)
 │   └── Auth/

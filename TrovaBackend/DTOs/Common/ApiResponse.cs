@@ -1,4 +1,4 @@
-namespace TrovaAPI.DTOs.Common;
+namespace TrovaBackend.DTOs.Common;
 
 /// <summary>
 /// Consistent envelope for every API response, so the frontend always

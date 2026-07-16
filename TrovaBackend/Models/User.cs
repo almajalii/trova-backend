@@ -1,20 +1,20 @@
-namespace TrovaAPI.Models;
+namespace TrovaBackend.Models;
 
 /// <summary>
-/// Base user entity. Extend with Trova-specific fields (role, profile info, etc.)
-/// once the domain is defined.
+/// Base user entity. Extend with Trova-specific fields (contractor profile,
+/// company info, etc.) once those screens are defined.
 /// </summary>
 public class User
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
+
+    // Not collected at signup per current frontend — keep optional for later.
     public string? Phone { get; set; }
 
-    // Placeholder for future role-based access (e.g. "user", "admin").
-    // Adjust once Trova's roles are known.
+    // Placeholder for future role-based access (e.g. "contractor", "admin").
     public string Role { get; set; } = "user";
 
     public bool IsBanned { get; set; } = false;

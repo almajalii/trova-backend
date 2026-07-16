@@ -5,11 +5,11 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using TrovaAPI.Data;
+using TrovaBackend.Data;
 
 #nullable disable
 
-namespace TrovaAPI.Migrations
+namespace TrovaBackend.Migrations
 {
     [DbContext(typeof(AppDbContext))]
     [Migration("20260712191459_InitialCreate")]
@@ -25,7 +25,7 @@ namespace TrovaAPI.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("TrovaAPI.Models.User", b =>
+            modelBuilder.Entity("TrovaBackend.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()

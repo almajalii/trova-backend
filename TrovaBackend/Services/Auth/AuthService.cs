@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using TrovaAPI.Data;
-using TrovaAPI.DTOs.Auth;
-using TrovaAPI.Models;
+using TrovaBackend.Data;
+using TrovaBackend.Data;
+using TrovaBackend.DTOs.Auth;
+using TrovaBackend.Models;
 
-namespace TrovaAPI.Services.Auth;
+namespace TrovaBackend.Services.Auth;
 
 public interface IAuthService
 {
@@ -26,16 +27,16 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == request.Email.ToLower().Trim()))
+        var normalizedEmail = request.Email.ToLower().Trim();
+
+        if (await _db.Users.AnyAsync(u => u.Email == normalizedEmail))
             throw new InvalidOperationException("An account with this email already exists.");
 
         var user = new User
         {
-            FirstName = request.FirstName.Trim(),
-            LastName = request.LastName.Trim(),
-            Email = request.Email.ToLower().Trim(),
+            Name = request.Name.Trim(),
+            Email = normalizedEmail,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Phone = request.Phone?.Trim(),
             Role = "user",
         };
 
@@ -48,7 +49,8 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == request.Email.ToLower().Trim())
+        var normalizedEmail = request.Email.ToLower().Trim();
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail)
             ?? throw new UnauthorizedAccessException("Invalid email or password.");
 
         if (user.IsBanned)
@@ -84,8 +86,7 @@ public class AuthService : IAuthService
     private static UserDto MapToDto(User user) => new()
     {
         Id = user.Id,
-        FirstName = user.FirstName,
-        LastName = user.LastName,
+        Name = user.Name,
         Email = user.Email,
         Phone = user.Phone,
         Role = user.Role,

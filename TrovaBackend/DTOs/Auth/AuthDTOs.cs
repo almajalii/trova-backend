@@ -1,18 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace TrovaAPI.DTOs.Auth;
+namespace TrovaBackend.DTOs.Auth;
 
 // ── Requests ──────────────────────────────────────────────────────────────
 
 public class RegisterRequest
 {
-    [Required(ErrorMessage = "First name is required")]
-    [MaxLength(100)]
-    public string FirstName { get; set; } = string.Empty;
-
-    [Required(ErrorMessage = "Last name is required")]
-    [MaxLength(100)]
-    public string LastName { get; set; } = string.Empty;
+    [Required(ErrorMessage = "Name is required")]
+    [MaxLength(150)]
+    public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Email is required")]
     [EmailAddress(ErrorMessage = "Invalid email format")]
@@ -25,9 +21,6 @@ public class RegisterRequest
     [Required(ErrorMessage = "Confirm password is required")]
     [Compare("Password", ErrorMessage = "Passwords do not match")]
     public string ConfirmPassword { get; set; } = string.Empty;
-
-    [Phone(ErrorMessage = "Invalid phone number")]
-    public string? Phone { get; set; }
 }
 
 public class LoginRequest
@@ -61,8 +54,7 @@ public class AuthResponse
 public class UserDto
 {
     public Guid Id { get; set; }
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string Role { get; set; } = string.Empty;

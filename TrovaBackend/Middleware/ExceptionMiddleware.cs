@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
-using TrovaAPI.DTOs.Common;
+using TrovaBackend.DTOs.Common;
 
-namespace TrovaAPI.Middleware;
+namespace TrovaBackend.Middleware;
 
 /// <summary>
 /// Catches unhandled exceptions and converts them into consistent JSON error responses,

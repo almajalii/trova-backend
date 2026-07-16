@@ -2,9 +2,9 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using TrovaAPI.Models;
+using TrovaBackend.Models;
 
-namespace TrovaAPI.Services.Auth;
+namespace TrovaBackend.Services.Auth;
 
 public interface ITokenService
 {
@@ -34,8 +34,7 @@ public class TokenService : ITokenService
             new Claim(ClaimTypes.NameIdentifier,     user.Id.ToString()),
             new Claim(ClaimTypes.Email,              user.Email),
             new Claim(ClaimTypes.Role,               user.Role),
-            new Claim("first_name",                  user.FirstName),
-            new Claim("last_name",                   user.LastName),
+            new Claim("name",                        user.Name),
         };
 
         var token = new JwtSecurityToken(

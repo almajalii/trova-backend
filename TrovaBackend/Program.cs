@@ -1,6 +1,6 @@
-using TrovaAPI.Data;
-using TrovaAPI.Middleware;
-using TrovaAPI.Services.Auth;
+using TrovaBackend.Data;
+using TrovaBackend.Middleware;
+using TrovaBackend.Services.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
