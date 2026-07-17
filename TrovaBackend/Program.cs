@@ -19,6 +19,7 @@ builder.Services.AddMemoryCache();
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<TrovaBackend.Services.IEmailService, TrovaBackend.Services.EmailService>();
 
 // JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Key"]!;
