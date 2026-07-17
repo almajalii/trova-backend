@@ -19,6 +19,11 @@ public class User
     public string? PasswordResetToken { get; set; }
     public DateTime? PasswordResetTokenExpiry { get; set; }
 
+    // ── Identity verification ───────────────────────────────────────────
+    public bool IsIdentityVerified { get; set; } = false;
+    public string? NationalId { get; set; }
+    public string? IdentityVerificationMethod { get; set; } // "sanad" or "scan"
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

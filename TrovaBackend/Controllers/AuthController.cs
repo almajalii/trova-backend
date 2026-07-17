@@ -133,4 +133,20 @@ public class AuthController : ControllerBase
             Message = "Password has been reset successfully."
         });
     }
+
+    // POST /api/auth/verify-identity
+    // Authenticated — called from both the Sanad and Scan-ID confirm screens
+    // once the user has confirmed (or corrected) their details.
+    [HttpPost("verify-identity")]
+    [Authorize]
+    public async Task<IActionResult> VerifyIdentity([FromBody] VerifyIdentityRequest request)
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        await _authService.VerifyIdentityAsync(userId, request);
+        return Ok(new ApiResponse<object>
+        {
+            Success = true,
+            Message = "Identity verified successfully."
+        });
+    }
 }

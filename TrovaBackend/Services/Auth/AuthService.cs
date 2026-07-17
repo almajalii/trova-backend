@@ -16,6 +16,7 @@ public interface IAuthService
     Task VerifyEmailAsync(Guid userId, string code);
     Task ForgotPasswordAsync(ForgotPasswordRequest request);
     Task ResetPasswordAsync(ResetPasswordRequest request);
+    Task VerifyIdentityAsync(Guid userId, VerifyIdentityRequest request);
 }
 
 public class AuthService : IAuthService
@@ -187,6 +188,21 @@ public class AuthService : IAuthService
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         user.PasswordResetToken = null;
         user.PasswordResetTokenExpiry = null;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+    }
+
+    public async Task VerifyIdentityAsync(Guid userId, VerifyIdentityRequest request)
+    {
+        var user = await _db.Users.FindAsync(userId)
+            ?? throw new KeyNotFoundException("User not found.");
+
+        // The name confirmed on the ID card (Sanad or scanned) is treated as
+        // more authoritative than whatever was typed at signup.
+        user.Name = request.FullName.Trim();
+        user.IsIdentityVerified = true;
+        user.NationalId = request.NationalId.Trim();
+        user.IdentityVerificationMethod = request.Method;
         user.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
     }

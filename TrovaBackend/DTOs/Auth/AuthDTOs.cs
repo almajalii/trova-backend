@@ -76,6 +76,23 @@ public class VerifyEmailRequest
     public string Code { get; set; } = string.Empty;
 }
 
+// Matches Flutter's identity-verification flow — { nationalId, method }.
+// Method is either "sanad" (currently mocked on the frontend) or "scan"
+// (real camera + on-device OCR).
+public class VerifyIdentityRequest
+{
+    [Required(ErrorMessage = "Full name is required")]
+    [MaxLength(150)]
+    public string FullName { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "National ID is required")]
+    public string NationalId { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "Method is required")]
+    [RegularExpression("^(sanad|scan)$", ErrorMessage = "Method must be 'sanad' or 'scan'")]
+    public string Method { get; set; } = string.Empty;
+}
+
 // ── Responses ─────────────────────────────────────────────────────────────
 
 public class AuthResponse
