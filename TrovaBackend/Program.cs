@@ -20,6 +20,19 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<TrovaBackend.Services.IEmailService, TrovaBackend.Services.EmailService>();
+builder.Services.AddScoped<TrovaBackend.Services.CompanyDetails.ICompanyDetailsService, TrovaBackend.Services.CompanyDetails.CompanyDetailsService>();
+builder.Services.Configure<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions>(
+    builder.Configuration.GetSection("CompanyClassification"));
+
+// Bank connection — MockJofsDataProvider stands in for the real JOFS
+// sandbox client. Swap this one registration to go live later.
+builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();
+builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IBankConnectionService, TrovaBackend.Services.BankConnection.BankConnectionService>();
+
+// Capability score
+builder.Services.AddScoped<TrovaBackend.Services.CapabilityScore.ICapabilityScoreService, TrovaBackend.Services.CapabilityScore.CapabilityScoreService>();
+builder.Services.Configure<TrovaBackend.Services.CapabilityScore.ScoringOptions>(
+    builder.Configuration.GetSection("ScoringConfig"));
 
 // JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Key"]!;
