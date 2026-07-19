@@ -29,7 +29,7 @@ public class BankConnectionService : IBankConnectionService
             throw new ArgumentException(
                 $"Unknown bank code '{request.BankCode}'. Allowed values: {string.Join(", ", TrovaBanks.DisplayNames.Keys)}");
 
-        var snapshot = await _dataProvider.FetchAccountSnapshotAsync(request.BankCode);
+        var snapshot = await _dataProvider.FetchAccountSnapshotAsync(userId, request.BankCode);
 
         var connection = await _db.BankConnections.FirstOrDefaultAsync(b => b.UserId == userId);
         var isNew = connection == null;

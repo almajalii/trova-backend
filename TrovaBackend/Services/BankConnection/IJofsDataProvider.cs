@@ -12,7 +12,7 @@ namespace TrovaBackend.Services.BankConnection;
 // self-reported input instead (see BankConnection.cs and ConnectBankRequest).
 public interface IJofsDataProvider
 {
-    Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(string bankCode);
+    Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(Guid userId, string bankCode);
 }
 
 public class JofsAccountSnapshot

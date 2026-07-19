@@ -15,11 +15,14 @@ namespace TrovaBackend.Services.BankConnection;
 // class to the real one — nothing else changes.
 public class MockJofsDataProvider : IJofsDataProvider
 {
-    public Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(string bankCode)
+    public Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(Guid userId, string bankCode)
     {
-        // Seeded by bank code so the same bank always yields the same demo
-        // numbers, instead of a different score every time someone re-tests.
-        var rng = new Random(bankCode.GetHashCode());
+        // Seeded by user + bank so the same person always sees the same
+        // demo numbers on repeat calls (consistent for testing/demoing),
+        // but two different users connecting to the same bank get
+        // different profiles instead of an identical fake balance.
+        var seed = HashCode.Combine(userId, bankCode);
+        var rng = new Random(seed);
 
         var snapshot = new JofsAccountSnapshot
         {

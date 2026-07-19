@@ -32,6 +32,12 @@ public static class TrovaBanks
     };
 }
 
+public class BankOptionDto
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
 // NOTE: this is my proposed contract, not confirmed against an existing
 // Flutter bank_connection_service.dart — I didn't have that file to check
 // field names against. Matches the Connect Bank screen's bank list
