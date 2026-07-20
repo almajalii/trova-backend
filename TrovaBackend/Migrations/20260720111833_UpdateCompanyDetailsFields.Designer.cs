@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrovaBackend.Data;
@@ -12,9 +13,11 @@ using TrovaBackend.Data;
 namespace TrovaBackend.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720111833_UpdateCompanyDetailsFields")]
+    partial class UpdateCompanyDetailsFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -182,10 +185,6 @@ namespace TrovaBackend.Migrations
                     b.Property<decimal>("AnnualRevenueJod")
                         .HasColumnType("numeric");
 
-                    b.Property<string>("BusinessLicenseNumber")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<string>("ClassificationCode")
                         .IsRequired()
                         .HasColumnType("text");
@@ -194,44 +193,12 @@ namespace TrovaBackend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("ContractorClassificationGrade")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("CountryOfRegistration")
+                    b.Property<string>("CompanyName")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LegalCompanyName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("LegalStructure")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PositionTitle")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PrimaryContactName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PrimaryEmail")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PrimaryPhoneNumber")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("RegisteredAddress")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<string>("RegistrationNumber")
                         .IsRequired()
@@ -241,16 +208,8 @@ namespace TrovaBackend.Migrations
                         .IsRequired()
                         .HasColumnType("text[]");
 
-                    b.Property<string>("TaxVatNumber")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<int>("TeamSize")
                         .HasColumnType("integer");
-
-                    b.Property<string>("TradingName")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -258,7 +217,7 @@ namespace TrovaBackend.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("YearOfEstablishment")
+                    b.Property<int>("YearsInOperation")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");

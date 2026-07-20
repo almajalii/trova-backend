@@ -1,111 +1,73 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using TrovaBackend.Data;
-using TrovaBackend.DTOs.CompanyDetails;
-using TrovaBackend.Models;
+﻿using TrovaBackend.DTOs;
 
-namespace TrovaBackend.Services.CompanyDetails;
-
-public interface ICompanyDetailsService
+namespace TrovaBackend.Services
 {
-    Task<CompanyDetailsResponse> SubmitAsync(Guid userId, SubmitCompanyDetailsRequest request);
-    Task<CompanyDetailsFullResponse> GetAsync(Guid userId);
-}
-
-public class CompanyDetailsService : ICompanyDetailsService
-{
-    private readonly AppDbContext _db;
-    private readonly CompanyClassificationOptions _classificationOptions;
-
-    public CompanyDetailsService(AppDbContext db, IOptions<CompanyClassificationOptions> classificationOptions)
+    public interface ICompanyDetailsService
     {
-        _db = db;
-        _classificationOptions = classificationOptions.Value;
+        Task<ScoreClassificationDto> SubmitCompanyDetailsAsync(string userId, CompanyDetailsDraftDto draft);
+        Task<CompanyDetailsRecordDto?> GetCompanyDetailsAsync(string userId);
     }
 
-    public async Task<CompanyDetailsResponse> SubmitAsync(Guid userId, SubmitCompanyDetailsRequest request)
+    public class CompanyDetailsService : ICompanyDetailsService
     {
-        ValidateSectors(request.Sectors);
+        // Mocking the database behavior
+        private static readonly Dictionary<string, CompanyDetailsRecordDto> _mockDb = new();
 
-        var entity = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == userId);
-        var isNew = entity == null;
-        entity ??= new Models.CompanyDetails { UserId = userId };
-
-        entity.CompanyName = request.CompanyName.Trim();
-        entity.Sectors = request.Sectors.Distinct().ToList();
-        entity.RegistrationNumber = request.RegistrationNumber.Trim();
-        entity.YearsInOperation = request.YearsInOperation;
-        entity.TeamSize = request.TeamSize;
-        entity.AnnualRevenueJod = request.AnnualRevenueJod;
-
-        var (code, label) = ClassifyCompany(request.TeamSize, request.AnnualRevenueJod, request.YearsInOperation);
-        entity.ClassificationCode = code;
-        entity.ClassificationLabel = label;
-        entity.UpdatedAt = DateTime.UtcNow;
-
-        if (isNew)
-            _db.CompanyDetails.Add(entity);
-
-        await _db.SaveChangesAsync();
-
-        return new CompanyDetailsResponse
+        public async Task<ScoreClassificationDto> SubmitCompanyDetailsAsync(string userId, CompanyDetailsDraftDto draft)
         {
-            Classification = new ClassificationDto { Code = code, Label = label }
-        };
-    }
+            // Calculate classification based on majority-of-3 rule (Mock logic)
+            var classification = CalculateClassificationFit(draft.TeamSize, draft.AnnualRevenueJod, draft.YearsOfExperience);
 
-    public async Task<CompanyDetailsFullResponse> GetAsync(Guid userId)
-    {
-        var entity = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == userId)
-            ?? throw new KeyNotFoundException("Company details have not been submitted yet.");
-
-        return new CompanyDetailsFullResponse
-        {
-            CompanyName = entity.CompanyName,
-            Sectors = entity.Sectors,
-            RegistrationNumber = entity.RegistrationNumber,
-            YearsInOperation = entity.YearsInOperation,
-            TeamSize = entity.TeamSize,
-            AnnualRevenueJod = entity.AnnualRevenueJod,
-            Classification = new ClassificationDto
+            var record = new CompanyDetailsRecordDto
             {
-                Code = entity.ClassificationCode,
-                Label = entity.ClassificationLabel
-            }
-        };
-    }
+                LegalCompanyName = draft.LegalCompanyName,
+                TradingName = draft.TradingName,
+                RegistrationNumber = draft.RegistrationNumber,
+                TaxVatNumber = draft.TaxVatNumber,
+                LegalStructure = draft.LegalStructure,
+                YearOfEstablishment = draft.YearOfEstablishment,
+                RegisteredAddress = draft.RegisteredAddress,
+                CountryOfRegistration = draft.CountryOfRegistration,
+                PrimaryContactName = draft.PrimaryContactName,
+                PositionTitle = draft.PositionTitle,
+                PrimaryEmail = draft.PrimaryEmail,
+                PrimaryPhoneNumber = draft.PrimaryPhoneNumber,
+                BusinessLicenseNumber = draft.BusinessLicenseNumber,
+                ContractorClassificationGrade = draft.ContractorClassificationGrade,
+                Sectors = draft.Sectors,
+                YearsOfExperience = draft.YearsOfExperience,
+                TeamSize = draft.TeamSize,
+                AnnualRevenueJod = draft.AnnualRevenueJod,
+                PrimaryBankName = draft.PrimaryBankName,
+                IbanNumber = draft.IbanNumber,
+                SwiftBicCode = draft.SwiftBicCode,
+                BankBranchNameCity = draft.BankBranchNameCity,
+                Classification = classification
+            };
 
-    private static void ValidateSectors(List<string> sectors)
-    {
-        var invalid = sectors.Where(s => !TrovaSectors.All.Contains(s)).ToList();
-        if (invalid.Count > 0)
-            throw new ArgumentException(
-                $"Invalid sector(s): {string.Join(", ", invalid)}. Allowed values: {string.Join(", ", TrovaSectors.All)}");
-    }
+            // Save to DB (mocked)
+            _mockDb[userId] = record;
 
-    // ── Classification: majority-of-3 signals ───────────────────────────
-    // A company qualifies for a tier if it meets at least 2 of that tier's
-    // 3 criteria (team size, revenue, years in operation) — a single
-    // strong signal (e.g. huge revenue but brand new, 1-person company)
-    // isn't enough on its own. Thresholds come from appsettings.json
-    // ("CompanyClassification" section), not hardcoded here.
-    private (string Code, string Label) ClassifyCompany(int teamSize, decimal annualRevenueJod, int yearsInOperation)
-    {
-        if (MeetsAtLeastTwo(teamSize, annualRevenueJod, yearsInOperation, _classificationOptions.ClassA))
-            return ("A", "Large Enterprise");
+            return await Task.FromResult(classification);
+        }
 
-        if (MeetsAtLeastTwo(teamSize, annualRevenueJod, yearsInOperation, _classificationOptions.ClassB))
-            return ("B", "Medium Enterprise");
+        public async Task<CompanyDetailsRecordDto?> GetCompanyDetailsAsync(string userId)
+        {
+            _mockDb.TryGetValue(userId, out var record);
+            return await Task.FromResult(record);
+        }
 
-        return ("C", "Small Enterprise");
-    }
+        private ScoreClassificationDto CalculateClassificationFit(int teamSize, decimal revenue, int years)
+        {
+            // Placeholder for your actual majority-of-3 logic
+            int points = 0;
+            if (teamSize >= 50) points++;
+            if (revenue >= 500000) points++;
+            if (years >= 10) points++;
 
-    private static bool MeetsAtLeastTwo(int teamSize, decimal annualRevenueJod, int yearsInOperation, ClassTierThresholds t)
-    {
-        var signalsMet = 0;
-        if (teamSize >= t.MinTeamSize) signalsMet++;
-        if (annualRevenueJod >= t.MinRevenueJod) signalsMet++;
-        if (yearsInOperation >= t.MinYearsInOperation) signalsMet++;
-        return signalsMet >= 2;
+            if (points >= 2) return new ScoreClassificationDto { Code = "A", Label = "Large Enterprise" };
+            if (points == 1) return new ScoreClassificationDto { Code = "B", Label = "Medium Enterprise" };
+            return new ScoreClassificationDto { Code = "C", Label = "Small Enterprise" };
+        }
     }
 }

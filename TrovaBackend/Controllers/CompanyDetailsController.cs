@@ -1,55 +1,69 @@
-﻿using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using TrovaBackend.DTOs.Common;
-using TrovaBackend.DTOs.CompanyDetails;
-using TrovaBackend.Services.CompanyDetails;
+using System.Security.Claims;
+using TrovaBackend.DTOs;
+using TrovaBackend.Services;
 
-namespace TrovaBackend.Controllers;
-
-[ApiController]
-[Route("api/company-details")]
-[Authorize]
-public class CompanyDetailsController : ControllerBase
+namespace TrovaBackend.Controllers
 {
-    private readonly ICompanyDetailsService _companyDetailsService;
-
-    public CompanyDetailsController(ICompanyDetailsService companyDetailsService)
+    [ApiController]
+    [Route("api/company-details")]
+    [Authorize] // Enforces the Bearer auth requirement
+    public class CompanyDetailsController : ControllerBase
     {
-        _companyDetailsService = companyDetailsService;
-    }
+        private readonly ICompanyDetailsService _companyDetailsService;
 
-    // POST /api/company-details
-    // Matches Flutter's CompanyDetailsService.submit — called once from the
-    // onboarding step between identity verification and Connect Bank.
-    // Also acts as an upsert if called again (e.g. user edits from Company
-    // Profile later), same pattern the Flutter comment expects.
-    [HttpPost("")]
-    public async Task<IActionResult> Submit([FromBody] SubmitCompanyDetailsRequest request)
-    {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var result = await _companyDetailsService.SubmitAsync(userId, request);
-        return StatusCode(201, new ApiResponse<CompanyDetailsResponse>
+        public CompanyDetailsController(ICompanyDetailsService companyDetailsService)
         {
-            Success = true,
-            Message = "Company details saved successfully.",
-            Data = result
-        });
-    }
+            _companyDetailsService = companyDetailsService;
+        }
 
-    // GET /api/company-details
-    // Used by Company Profile / My Score screens to display the saved
-    // company info and classification without resubmitting the form.
-    [HttpGet("")]
-    public async Task<IActionResult> Get()
-    {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var result = await _companyDetailsService.GetAsync(userId);
-        return Ok(new ApiResponse<CompanyDetailsFullResponse>
+        // POST /api/company-details
+        [HttpPost]
+        public async Task<IActionResult> SubmitDetails([FromBody] CompanyDetailsDraftDto draft)
         {
-            Success = true,
-            Message = "Company details retrieved successfully.",
-            Data = result
-        });
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Extract the user ID from the Bearer token claims
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized();
+            }
+
+            var classification = await _companyDetailsService.SubmitCompanyDetailsAsync(userId, draft);
+
+            // Shape the response exactly as expected: { "data": { "classification": { "code": "A", "label": "..." } } }
+            var response = new ApiResponse<object>
+            {
+                Data = new { Classification = classification }
+            };
+
+            return StatusCode(201, response);
+        }
+
+        // GET /api/company-details
+        [HttpGet]
+        public async Task<IActionResult> GetDetails()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized();
+            }
+
+            var record = await _companyDetailsService.GetCompanyDetailsAsync(userId);
+
+            // Returns 404 (data: null) if the user hasn't submitted yet
+            if (record == null)
+            {
+                return NotFound(new ApiResponse<object?> { Data = null });
+            }
+
+            return Ok(new ApiResponse<CompanyDetailsRecordDto> { Data = record });
+        }
     }
 }

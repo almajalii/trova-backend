@@ -1,11 +1,12 @@
-using TrovaBackend.Data;
-using TrovaBackend.Middleware;
-using TrovaBackend.Services.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using TrovaBackend.Data;
+using TrovaBackend.Middleware;
+using TrovaBackend.Services;
+using TrovaBackend.Services.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,8 +21,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<TrovaBackend.Services.IEmailService, TrovaBackend.Services.EmailService>();
-builder.Services.AddScoped<TrovaBackend.Services.CompanyDetails.ICompanyDetailsService, TrovaBackend.Services.CompanyDetails.CompanyDetailsService>();
-builder.Services.Configure<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions>(
+builder.Services.AddScoped<ICompanyDetailsService, CompanyDetailsService>(); builder.Services.Configure<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions>(
     builder.Configuration.GetSection("CompanyClassification"));
 
 // Bank connection — MockJofsDataProvider stands in for the real JOFS

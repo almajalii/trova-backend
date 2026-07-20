@@ -24,12 +24,54 @@ public class MockJofsDataProvider : IJofsDataProvider
         var seed = HashCode.Combine(userId, bankCode);
         var rng = new Random(seed);
 
+        // Balance + status distribution below matches the real seed data
+        // stats JoPACC shared for the JOFS sandbox's Business/Corporate
+        // test accounts (BUS_CUST_*/CORP_CUST_* — the categories that
+        // match a contracting company, not IND_CUST_* individuals):
+        //   Zero balance: 23% (mostly closed accounts)
+        //   Negative/overdraft: 24% (mostly suspended)
+        //   Low (1,500-25,000 JOD): ~18%
+        //   Normal (25,000-150,000 JOD): ~18%
+        //   High (150,000+ JOD, typically corporate): ~17%
+        // Overall status split across all sandbox accounts: Active 53%,
+        // Suspended 24%, Closed 23% — roughly tracked here by tying status
+        // to the balance branch, same pattern the real data shows.
+        var roll = rng.NextDouble();
+        decimal balance;
+        string status;
+
+        if (roll < 0.23)
+        {
+            balance = 0m;
+            status = "closed";
+        }
+        else if (roll < 0.47)
+        {
+            balance = -rng.Next(200, 8_000);
+            status = "suspended";
+        }
+        else if (roll < 0.65)
+        {
+            balance = rng.Next(1_500, 25_000);
+            status = "active";
+        }
+        else if (roll < 0.83)
+        {
+            balance = rng.Next(25_000, 150_000);
+            status = "active";
+        }
+        else
+        {
+            balance = rng.Next(150_000, 500_000);
+            status = "active";
+        }
+
         var snapshot = new JofsAccountSnapshot
         {
             AccountAddress = $"JO{rng.Next(10, 99)}{bankCode.ToUpperInvariant()}{rng.Next(1000000, 9999999)}",
             AccountCurrency = "JOD",
-            AccountStatus = "active",
-            AvailableBalanceAmount = rng.Next(80_000, 350_000),
+            AccountStatus = status,
+            AvailableBalanceAmount = balance,
             NumberOfCurrentDebts = rng.Next(0, 4),
             AverageMonthlyCashflowChangePercent = rng.Next(-5, 10)
         };
