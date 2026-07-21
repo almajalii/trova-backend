@@ -43,6 +43,7 @@ public class AuthService : IAuthService
         {
             Name = request.Name.Trim(),
             Email = normalizedEmail,
+            Phone = request.Phone.Trim(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "user",
         };
