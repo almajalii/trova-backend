@@ -25,6 +25,7 @@ builder.Services.AddScoped<TrovaBackend.Services.IEmailService, TrovaBackend.Ser
 builder.Services.AddScoped<ICompanyDetailsService, CompanyDetailsService>(); builder.Services.Configure<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions>(
 builder.Configuration.GetSection("CompanyClassification"));
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<TrovaBackend.Services.Bids.IBidService, TrovaBackend.Services.Bids.BidService>();
 // Bank connection — MockJofsDataProvider stands in for the real JOFS
 // sandbox client. Swap this one registration to go live later.
 builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();

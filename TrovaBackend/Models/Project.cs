@@ -11,6 +11,16 @@ public static class ProjectStatus
     public const string InProgress = "in_progress";
     public const string Completed = "completed";
     public const string Cancelled = "cancelled";
+
+    // Added for My Projects / Project History / Project Detail. Internal
+    // values are lower_snake_case; the read DTOs upper-case them at the
+    // edge (e.g. "contractor_backed_off" -> "CONTRACTOR_BACKED_OFF") so no
+    // separate mapping table is needed.
+    public const string ContractorBackedOff = "contractor_backed_off";
+    public const string GuaranteeRejectedByYou = "guarantee_rejected_by_you";
+    public const string PendingReview = "pending_review";
+    public const string Disputed = "disputed";
+    public const string Failed = "failed";
 }
 
 public class Project
@@ -51,6 +61,11 @@ public class Project
     public DateTime BidSubmissionDeadline { get; set; }
 
     public string Status { get; set; } = ProjectStatus.OpenForBids;
+
+    // Set once the owner picks a winning bid (status -> Awarded). Points at
+    // the Bid the rest of the award/guarantee flow revolves around — who to
+    // display as "Awarded to", whether they've confirmed yet, etc.
+    public Guid? AwardedBidId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -1,4 +1,7 @@
-﻿using TrovaBackend.DTOs;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using TrovaBackend.Data;
+using TrovaBackend.DTOs;
 
 namespace TrovaBackend.Services
 {
@@ -10,64 +13,133 @@ namespace TrovaBackend.Services
 
     public class CompanyDetailsService : ICompanyDetailsService
     {
-        // Mocking the database behavior
-        private static readonly Dictionary<string, CompanyDetailsRecordDto> _mockDb = new();
+        private readonly AppDbContext _db;
+        private readonly TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions _options;
 
+        public CompanyDetailsService(AppDbContext db, IOptions<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions> options)
+        {
+            _db = db;
+            _options = options.Value;
+        }
+
+        // Upsert against the real CompanyDetails table — one row per user,
+        // same pattern as BankConnection/CapabilityScore (HasIndex(UserId).IsUnique()).
+        //
+        // NOTE: CompanyDetailsDraftDto still carries YearsOfExperience,
+        // PrimaryBankName, IbanNumber, SwiftBicCode, BankBranchNameCity —
+        // fields the real Models.CompanyDetails entity doesn't have columns
+        // for (bank data lives in the separate, real BankConnection table
+        // via the JOFS flow instead). Those fields are accepted from the
+        // client but not persisted here. Flagging rather than silently
+        // dropping: if the frontend actually depends on reading them back,
+        // that needs a migration + a decision on where they belong.
         public async Task<ScoreClassificationDto> SubmitCompanyDetailsAsync(string userId, CompanyDetailsDraftDto draft)
         {
-            // Calculate classification based on majority-of-3 rule (Mock logic)
-            var classification = CalculateClassificationFit(draft.TeamSize, draft.AnnualRevenueJod, draft.YearsOfExperience);
+            var userGuid = Guid.Parse(userId);
 
-            var record = new CompanyDetailsRecordDto
-            {
-                LegalCompanyName = draft.LegalCompanyName,
-                TradingName = draft.TradingName,
-                RegistrationNumber = draft.RegistrationNumber,
-                TaxVatNumber = draft.TaxVatNumber,
-                LegalStructure = draft.LegalStructure,
-                YearOfEstablishment = draft.YearOfEstablishment,
-                RegisteredAddress = draft.RegisteredAddress,
-                CountryOfRegistration = draft.CountryOfRegistration,
-                PrimaryContactName = draft.PrimaryContactName,
-                PositionTitle = draft.PositionTitle,
-                PrimaryEmail = draft.PrimaryEmail,
-                PrimaryPhoneNumber = draft.PrimaryPhoneNumber,
-                BusinessLicenseNumber = draft.BusinessLicenseNumber,
-                ContractorClassificationGrade = draft.ContractorClassificationGrade,
-                Sectors = draft.Sectors,
-                YearsOfExperience = draft.YearsOfExperience,
-                TeamSize = draft.TeamSize,
-                AnnualRevenueJod = draft.AnnualRevenueJod,
-                PrimaryBankName = draft.PrimaryBankName,
-                IbanNumber = draft.IbanNumber,
-                SwiftBicCode = draft.SwiftBicCode,
-                BankBranchNameCity = draft.BankBranchNameCity,
-                Classification = classification
-            };
+            var entity = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == userGuid);
+            var isNew = entity == null;
+            entity ??= new Models.CompanyDetails { UserId = userGuid };
 
-            // Save to DB (mocked)
-            _mockDb[userId] = record;
+            entity.LegalCompanyName = draft.LegalCompanyName;
+            entity.TradingName = draft.TradingName;
+            entity.RegistrationNumber = draft.RegistrationNumber;
+            entity.TaxVatNumber = draft.TaxVatNumber;
+            entity.LegalStructure = draft.LegalStructure;
+            entity.YearOfEstablishment = draft.YearOfEstablishment;
+            entity.RegisteredAddress = draft.RegisteredAddress;
+            entity.CountryOfRegistration = draft.CountryOfRegistration;
+            entity.PrimaryContactName = draft.PrimaryContactName;
+            entity.PositionTitle = draft.PositionTitle;
+            entity.PrimaryEmail = draft.PrimaryEmail;
+            entity.PrimaryPhoneNumber = draft.PrimaryPhoneNumber;
+            entity.BusinessLicenseNumber = draft.BusinessLicenseNumber;
+            entity.ContractorClassificationGrade = draft.ContractorClassificationGrade;
+            entity.Sectors = draft.Sectors;
+            entity.TeamSize = draft.TeamSize;
+            entity.AnnualRevenueJod = draft.AnnualRevenueJod;
+            entity.UpdatedAt = DateTime.UtcNow;
 
-            return await Task.FromResult(classification);
+            // Years in operation derived from YearOfEstablishment rather than
+            // trusting the client-submitted YearsOfExperience — same
+            // "don't trust a client-supplied flag" principle used for Bid
+            // eligibility elsewhere.
+            var yearsInOperation = DateTime.UtcNow.Year - draft.YearOfEstablishment;
+            var classification = CalculateClassification(draft.TeamSize, draft.AnnualRevenueJod, yearsInOperation);
+
+            entity.ClassificationCode = classification.Code;
+            entity.ClassificationLabel = classification.Label;
+
+            if (isNew)
+                _db.CompanyDetails.Add(entity);
+
+            await _db.SaveChangesAsync();
+
+            return classification;
         }
 
         public async Task<CompanyDetailsRecordDto?> GetCompanyDetailsAsync(string userId)
         {
-            _mockDb.TryGetValue(userId, out var record);
-            return await Task.FromResult(record);
+            var userGuid = Guid.Parse(userId);
+            var entity = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == userGuid);
+            if (entity == null) return null;
+
+            return new CompanyDetailsRecordDto
+            {
+                LegalCompanyName = entity.LegalCompanyName,
+                TradingName = entity.TradingName,
+                RegistrationNumber = entity.RegistrationNumber,
+                TaxVatNumber = entity.TaxVatNumber,
+                LegalStructure = entity.LegalStructure,
+                YearOfEstablishment = entity.YearOfEstablishment,
+                RegisteredAddress = entity.RegisteredAddress,
+                CountryOfRegistration = entity.CountryOfRegistration,
+                PrimaryContactName = entity.PrimaryContactName,
+                PositionTitle = entity.PositionTitle,
+                PrimaryEmail = entity.PrimaryEmail,
+                PrimaryPhoneNumber = entity.PrimaryPhoneNumber,
+                BusinessLicenseNumber = entity.BusinessLicenseNumber,
+                ContractorClassificationGrade = entity.ContractorClassificationGrade,
+                Sectors = entity.Sectors,
+                // Derived, not stored — see NOTE above.
+                YearsOfExperience = DateTime.UtcNow.Year - entity.YearOfEstablishment,
+                TeamSize = entity.TeamSize,
+                AnnualRevenueJod = entity.AnnualRevenueJod,
+                // Not modelled on Models.CompanyDetails — bank data belongs
+                // to the real BankConnection table. Left blank rather than
+                // fabricated.
+                PrimaryBankName = string.Empty,
+                IbanNumber = string.Empty,
+                SwiftBicCode = string.Empty,
+                BankBranchNameCity = string.Empty,
+                Classification = new ScoreClassificationDto
+                {
+                    Code = entity.ClassificationCode,
+                    Label = entity.ClassificationLabel
+                }
+            };
         }
 
-        private ScoreClassificationDto CalculateClassificationFit(int teamSize, decimal revenue, int years)
+        // Majority-of-3 rule against configured (appsettings.json-driven)
+        // thresholds — two tiers checked independently rather than the old
+        // single-threshold-set approach, since Class B has its own bar.
+        private ScoreClassificationDto CalculateClassification(int teamSize, decimal revenue, int yearsInOperation)
         {
-            // Placeholder for your actual majority-of-3 logic
-            int points = 0;
-            if (teamSize >= 50) points++;
-            if (revenue >= 500000) points++;
-            if (years >= 10) points++;
+            var classAPoints = 0;
+            if (teamSize >= _options.ClassA.MinTeamSize) classAPoints++;
+            if (revenue >= _options.ClassA.MinRevenueJod) classAPoints++;
+            if (yearsInOperation >= _options.ClassA.MinYearsInOperation) classAPoints++;
+            if (classAPoints >= 2)
+                return new ScoreClassificationDto { Code = "A", Label = "Class A" };
 
-            if (points >= 2) return new ScoreClassificationDto { Code = "A", Label = "Large Enterprise" };
-            if (points == 1) return new ScoreClassificationDto { Code = "B", Label = "Medium Enterprise" };
-            return new ScoreClassificationDto { Code = "C", Label = "Small Enterprise" };
+            var classBPoints = 0;
+            if (teamSize >= _options.ClassB.MinTeamSize) classBPoints++;
+            if (revenue >= _options.ClassB.MinRevenueJod) classBPoints++;
+            if (yearsInOperation >= _options.ClassB.MinYearsInOperation) classBPoints++;
+            if (classBPoints >= 2)
+                return new ScoreClassificationDto { Code = "B", Label = "Class B" };
+
+            return new ScoreClassificationDto { Code = "C", Label = "Class C" };
         }
     }
 }
