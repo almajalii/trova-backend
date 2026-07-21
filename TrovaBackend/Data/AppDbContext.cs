@@ -11,6 +11,7 @@ public class AppDbContext : DbContext
     public DbSet<Models.CompanyDetails> CompanyDetails => Set<Models.CompanyDetails>();
     public DbSet<Models.BankConnection> BankConnections => Set<Models.BankConnection>();
     public DbSet<Models.CapabilityScore> CapabilityScores => Set<Models.CapabilityScore>();
+    public DbSet<Models.Project> Projects => Set<Models.Project>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +36,17 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Models.CapabilityScore>(entity =>
         {
             entity.HasIndex(s => s.UserId).IsUnique();
+        });
+
+        modelBuilder.Entity<Models.Project>(entity =>
+        {
+            // Public-facing identifier — must be unique, this is how
+            // owners/contractors reference a project everywhere else.
+            entity.HasIndex(p => p.ProjectCode).IsUnique();
+
+            // Not unique — an owner posts many projects. Indexed because
+            // "My Projects" / "Project History" will filter by this.
+            entity.HasIndex(p => p.OwnerId);
         });
 
         // Add further entity configuration here as the domain grows.

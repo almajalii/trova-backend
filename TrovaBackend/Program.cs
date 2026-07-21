@@ -7,6 +7,7 @@ using TrovaBackend.Data;
 using TrovaBackend.Middleware;
 using TrovaBackend.Services;
 using TrovaBackend.Services.Auth;
+using TrovaBackend.Services.Projects;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,8 +23,8 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<TrovaBackend.Services.IEmailService, TrovaBackend.Services.EmailService>();
 builder.Services.AddScoped<ICompanyDetailsService, CompanyDetailsService>(); builder.Services.Configure<TrovaBackend.Services.CompanyDetails.CompanyClassificationOptions>(
-    builder.Configuration.GetSection("CompanyClassification"));
-
+builder.Configuration.GetSection("CompanyClassification"));
+builder.Services.AddScoped<IProjectService, ProjectService>();
 // Bank connection — MockJofsDataProvider stands in for the real JOFS
 // sandbox client. Swap this one registration to go live later.
 builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();
