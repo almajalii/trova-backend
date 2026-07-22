@@ -21,6 +21,11 @@ public class TrackRecordStatsDto
 {
     public int TotalProjects { get; set; }
     public int FailedProjects { get; set; }
+
+    // Awarded to this contractor and not yet completed, failed, or
+    // cancelled (i.e. Project.Status is Awarded or InProgress). Same
+    // "currently working on" signal as the CurrentWorkload score factor.
+    public int CurrentProjects { get; set; }
     public double AvgRating { get; set; }
 }
 

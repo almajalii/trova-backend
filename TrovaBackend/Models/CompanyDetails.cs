@@ -47,6 +47,14 @@ public class CompanyDetails
     public string ClassificationCode { get; set; } = string.Empty;
     public string ClassificationLabel { get; set; } = string.Empty;
 
+    // 4-digit code generated once on first use (same "random, verify
+    // uniqueness, persist" pattern as Project.ProjectCode) and reused
+    // afterwards. Displayed as "TRV-CON-{code}" or "TRV-OWN-{code}"
+    // depending on whether this company is being shown as a contractor or
+    // a project owner in a given response — see
+    // GuaranteeService.GetOrCreatePublicCodeAsync. Null until first needed.
+    public string? PublicCode { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

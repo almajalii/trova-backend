@@ -507,6 +507,7 @@ public class ProjectService : IProjectService
         foreach (var other in otherBids)
         {
             other.Status = BidStatus.NotSelected;
+            other.Note = "Owner selected a different bidder";
             other.UpdatedAt = DateTime.UtcNow;
         }
 

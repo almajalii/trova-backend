@@ -73,16 +73,25 @@ public class CapabilityScoreService : ICapabilityScoreService
         }
 
         // ── Internal factors (Trova's own project/payment history) ──────
-        // No Projects/Payments feature exists yet, so a brand-new
-        // contractor has a clean slate — scored at 100 (best case) rather
-        // than 0, since there's no negative signal yet, not an absence of
-        // one. Replace this block with real queries once Projects exist.
+        // Payments and reviews still don't exist as features, so those
+        // stay at a clean-slate default. Projects/Bids now exist, so
+        // currentProjects (and the CurrentWorkload factor derived from it)
+        // are wired up for real below.
         var totalProjects = 0;
         var failedProjects = 0;
         var avgRating = 0.0;
-        var activeProjects = 0;
         var successfulPayments = 0;
         var totalPayments = 0;
+
+        // Projects awarded to this user (as contractor) that are still
+        // active — i.e. not yet completed, failed, or cancelled.
+        var activeProjects = await (
+            from p in _db.Projects
+            join b in _db.Bids on p.AwardedBidId equals b.Id
+            where b.ContractorId == userId
+               && (p.Status == Models.ProjectStatus.Awarded || p.Status == Models.ProjectStatus.InProgress)
+            select p.Id
+        ).CountAsync();
 
         var paymentHistoryScore = totalPayments > 0
             ? Clamp0To100((int)Math.Round(100.0 * successfulPayments / totalPayments))
@@ -123,6 +132,7 @@ public class CapabilityScoreService : ICapabilityScoreService
         score.TierLabel = tierLabel;
         score.TotalProjects = totalProjects;
         score.FailedProjects = failedProjects;
+        score.CurrentProjects = activeProjects;
         score.AvgRating = avgRating;
 
         score.NumberOfCurrentDebtsScore = currentDebtsScore;
@@ -169,6 +179,7 @@ public class CapabilityScoreService : ICapabilityScoreService
             {
                 TotalProjects = score.TotalProjects,
                 FailedProjects = score.FailedProjects,
+                CurrentProjects = score.CurrentProjects,
                 AvgRating = score.AvgRating
             },
             Factors = new ScoreFactorsDto

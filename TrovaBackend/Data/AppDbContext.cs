@@ -13,6 +13,8 @@ public class AppDbContext : DbContext
     public DbSet<Models.CapabilityScore> CapabilityScores => Set<Models.CapabilityScore>();
     public DbSet<Models.Project> Projects => Set<Models.Project>();
     public DbSet<Models.Bid> Bids => Set<Models.Bid>();
+    public DbSet<Models.GuaranteeApplication> GuaranteeApplications => Set<Models.GuaranteeApplication>();
+    public DbSet<Models.GuaranteeDocument> GuaranteeDocuments => Set<Models.GuaranteeDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -27,6 +29,11 @@ public class AppDbContext : DbContext
         {
             // One company profile per user — Submit() upserts against this.
             entity.HasIndex(c => c.UserId).IsUnique();
+
+            // Nullable + unique — Postgres treats multiple NULLs as
+            // distinct, so companies that haven't had a code generated
+            // yet (PublicCode still null) don't collide with each other.
+            entity.HasIndex(c => c.PublicCode).IsUnique();
         });
 
         modelBuilder.Entity<Models.BankConnection>(entity =>
@@ -58,6 +65,18 @@ public class AppDbContext : DbContext
 
             // A contractor can only have one bid on a given project.
             entity.HasIndex(b => new { b.ProjectId, b.ContractorId }).IsUnique();
+        });
+
+        modelBuilder.Entity<Models.GuaranteeApplication>(entity =>
+        {
+            entity.HasIndex(g => g.ApplicationCode).IsUnique();
+            entity.HasIndex(g => g.ContractorId);
+            entity.HasIndex(g => g.ProjectId);
+        });
+
+        modelBuilder.Entity<Models.GuaranteeDocument>(entity =>
+        {
+            entity.HasIndex(d => d.GuaranteeApplicationId);
         });
 
         // Add further entity configuration here as the domain grows.

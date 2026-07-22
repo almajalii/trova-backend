@@ -12,6 +12,11 @@ public class CapabilityScore
     // until the Projects feature exists; wired up for real once it does.
     public int TotalProjects { get; set; }
     public int FailedProjects { get; set; }
+
+    // Wired up for real: count of Projects awarded to this user (as
+    // contractor) that are Awarded or InProgress. See CurrentWorkload
+    // below, which now derives from the same underlying count.
+    public int CurrentProjects { get; set; }
     public double AvgRating { get; set; }
 
     // ── 8 scoring factors, flattened (score 0-100 + human-readable why) ──

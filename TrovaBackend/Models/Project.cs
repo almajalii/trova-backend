@@ -69,4 +69,9 @@ public class Project
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // Set by POST /api/bids/{bidId}/mark-work-done (contractor declares
+    // work complete). GET /projects/{id}/submitted-work reads off this —
+    // that endpoint isn't built in this pass, but this is its trigger.
+    public DateTime? SubmittedDate { get; set; }
 }

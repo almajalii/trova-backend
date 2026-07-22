@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TrovaBackend.Data;
@@ -12,9 +13,11 @@ using TrovaBackend.Data;
 namespace TrovaBackend.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722110114_VerifyNoOp")]
+    partial class VerifyNoOp
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -95,9 +98,6 @@ namespace TrovaBackend.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
@@ -270,9 +270,6 @@ namespace TrovaBackend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("PublicCode")
-                        .HasColumnType("text");
-
                     b.Property<string>("RegisteredAddress")
                         .IsRequired()
                         .HasColumnType("text");
@@ -307,128 +304,10 @@ namespace TrovaBackend.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PublicCode")
-                        .IsUnique();
-
                     b.HasIndex("UserId")
                         .IsUnique();
 
                     b.ToTable("CompanyDetails");
-                });
-
-            modelBuilder.Entity("TrovaBackend.Models.GuaranteeApplication", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("AcceptTerms")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("AgreeIndemnify")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("ApplicationCode")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("BeneficiaryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("BidId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("ConfirmAccurate")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("ContractorId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("GuaranteeType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<decimal>("GuaranteedAmount")
-                        .HasColumnType("numeric");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SignatureName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("SpecialConditions")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ValidityExpiry")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ValidityStart")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApplicationCode")
-                        .IsUnique();
-
-                    b.HasIndex("ContractorId");
-
-                    b.HasIndex("ProjectId");
-
-                    b.ToTable("GuaranteeApplications");
-                });
-
-            modelBuilder.Entity("TrovaBackend.Models.GuaranteeDocument", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("DocumentType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("GuaranteeApplicationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("OriginalFileName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<long>("SizeBytes")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("StoredFileName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GuaranteeApplicationId");
-
-                    b.ToTable("GuaranteeDocuments");
                 });
 
             modelBuilder.Entity("TrovaBackend.Models.Project", b =>
@@ -494,9 +373,6 @@ namespace TrovaBackend.Migrations
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("SubmittedDate")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("TimelineText")
                         .IsRequired()
