@@ -169,10 +169,10 @@ public class GuaranteeService : IGuaranteeService
         if (string.IsNullOrWhiteSpace(request.SignatureName))
             throw new ArgumentException("A signature name is required.");
 
-        ValidatePdf(request.SignedContract, "signedContract", required: true);
-        ValidatePdf(request.LetterOfAward, "letterOfAward", required: true);
+        ValidateDocument(request.SignedContract, "signedContract", required: true);
+        ValidateDocument(request.LetterOfAward, "letterOfAward", required: true);
         foreach (var doc in request.OtherDocuments ?? new List<IFormFile>())
-            ValidatePdf(doc, "otherDocuments", required: true);
+            ValidateDocument(doc, "otherDocuments", required: true);
 
         var application = new GuaranteeApplication
         {
@@ -251,7 +251,12 @@ public class GuaranteeService : IGuaranteeService
 
     private static bool ParseFlag(string raw) => bool.TryParse(raw, out var value) && value;
 
-    private static void ValidatePdf(IFormFile? file, string fieldName, bool required)
+    // No file-type restriction — any document format is accepted. Only
+    // presence, non-empty, and the 10MB size cap are enforced. If you
+    // later want to restrict this back to a specific allow-list (e.g.
+    // PDF + images), add the extension check back here — it was removed
+    // deliberately, not an oversight.
+    private static void ValidateDocument(IFormFile? file, string fieldName, bool required)
     {
         if (file == null)
         {
@@ -264,12 +269,6 @@ public class GuaranteeService : IGuaranteeService
 
         if (file.Length > MaxFileSizeBytes)
             throw new ArgumentException($"{fieldName} exceeds the 10MB limit.");
-
-        // Extension is checked rather than trusting IFormFile.ContentType —
-        // some mobile multipart clients send generic/absent content types.
-        var extension = Path.GetExtension(file.FileName);
-        if (!string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException($"{fieldName} must be a PDF file.");
     }
 
     private async Task<string> GenerateUniqueApplicationCodeAsync()
