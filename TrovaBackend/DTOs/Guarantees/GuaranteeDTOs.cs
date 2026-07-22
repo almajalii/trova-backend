@@ -86,3 +86,32 @@ public class SubmitGuaranteeResponse
     public string GuaranteeApplicationId { get; set; } = string.Empty; // TRV-GT-XXXXX
     public string Status { get; set; } = string.Empty; // PENDING_BANK_REVIEW
 }
+
+// ── Owner-side read/decision ────────────────────────────────────────────
+// GET  /api/projects/{projectId}/guarantee
+// POST /api/guarantees/{guaranteeId}/approve  → same shape, Status ACTIVE
+// POST /api/guarantees/{guaranteeId}/reject   → same shape, Status REJECTED
+//
+// Matches guarantee_review_model.dart's OwnerGuarantee.fromJson exactly.
+// This is the project owner reviewing a guarantee the contractor has
+// already submitted — distinct from the contractor-facing Submit/Prefill
+// DTOs above. "PENDING_REVIEW" here means "awaiting the owner's decision",
+// which is what GuaranteeStatus.PendingBankReview means in practice today
+// since no separate bank-side step exists yet (see the comment on
+// GuaranteeService's Decision region) — internal storage keeps its
+// existing name, only the external vocabulary differs.
+public class OwnerGuaranteeDto
+{
+    public string GuaranteeId { get; set; } = string.Empty; // TRV-GT-XXXXX
+    public string ProjectId { get; set; } = string.Empty; // TRV-PRJ-XXXXX
+    public string ProjectTitle { get; set; } = string.Empty;
+    public string ContractorName { get; set; } = string.Empty; // "Principal" on the document
+    public string Beneficiary { get; set; } = string.Empty; // owner's own company name + " (You)"
+    public string IssuingBank { get; set; } = string.Empty;
+    public decimal AmountJod { get; set; }
+    public string Type { get; set; } = string.Empty; // e.g. "Performance Guarantee"
+    public string Status { get; set; } = string.Empty; // PENDING_REVIEW | ACTIVE | REJECTED | CLAIMED
+    public string? IssueDate { get; set; } // "yyyy-MM-dd", set once ACTIVE
+    public string? ValidUntil { get; set; } // "yyyy-MM-dd"
+    public string? ClaimDate { get; set; } // not modelled yet — always null until CLAIMED exists
+}

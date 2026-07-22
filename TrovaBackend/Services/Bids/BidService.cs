@@ -160,6 +160,134 @@ public class BidService : IBidService
         return await GetMyBidsAsync(contractorId);
     }
 
+    public async Task<BidDetailDto?> GetBidDetailAsync(Guid contractorId, Guid bidId)
+    {
+        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == bidId && b.ContractorId == contractorId);
+        if (bid == null) return null;
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == bid.ProjectId);
+        if (project == null) return null;
+
+        var ownerNames = await GetCompanyNamesAsync(new[] { project.OwnerId });
+        ownerNames.TryGetValue(project.OwnerId, out var companyName);
+
+        // Only Confirmed/InProgress bids can have one — same scoping as
+        // BuildMyBidsAsync. Latest by CreatedAt if more than one exists
+        // (a rejected-then-reapplied history).
+        var guaranteeApplication = (bid.Status == BidStatus.Confirmed || bid.Status == BidStatus.InProgress)
+            ? await _db.GuaranteeApplications
+                .Where(g => g.BidId == bid.Id)
+                .OrderByDescending(g => g.CreatedAt)
+                .FirstOrDefaultAsync()
+            : null;
+
+        var externalStatus = BidStatusMapper.ToExternal(bid.Status, guaranteeApplication?.Status);
+
+        return new BidDetailDto
+        {
+            Id = bid.Id.ToString(),
+            ProjectTitle = project.Title,
+            CompanyName = companyName ?? "Unknown",
+            Status = externalStatus,
+            Sector = project.Sector,
+            Location = project.Location,
+            ContractValue = project.ContractValueJod,
+            TimelineRange = project.TimelineText,
+            BidAmount = bid.BidAmountJod,
+            ProjectId = project.ProjectCode,
+            StatusSteps = BuildStatusSteps(bid, guaranteeApplication),
+
+            // Sent regardless of Status — see the comment on BidDetailDto.
+            Milestones = string.IsNullOrWhiteSpace(project.Milestones) ? null : project.Milestones,
+            GuaranteeTypeRequired = string.IsNullOrWhiteSpace(project.GuaranteeTypeRequired) ? null : project.GuaranteeTypeRequired,
+            PaymentTerms = string.IsNullOrWhiteSpace(project.PaymentTerms) ? null : project.PaymentTerms,
+            Description = string.IsNullOrWhiteSpace(project.Description) ? null : project.Description,
+
+            GuaranteeExpiresInDays = GuaranteeExpiresInDays(bid.Status, guaranteeApplication),
+
+            BannerNote = (externalStatus == "REJECTED" || externalStatus == "GUARANTEE_REJECTED")
+                ? (bid.Note ?? DefaultActiveNote(bid.Status, guaranteeApplication?.Status))
+                : null,
+
+            // No Review entity yet — see BidDTOs.cs.
+            ReviewRating = null,
+            ReviewText = null
+        };
+    }
+
+    // Four-stage timeline covering the happy path (Submitted -> Selected
+    // -> Guarantee -> Complete). Doesn't have a dedicated stage for
+    // BackedOff/BACKED_OFF — that status isn't in the frontend's handled
+    // enum for this screen, so it's not clear what that screen wants
+    // shown there yet; the steps below just describe wherever the bid
+    // got to before backing off, same as "rejected" does for NotSelected.
+    private static List<BidStatusStepDto> BuildStatusSteps(Bid bid, GuaranteeApplication? guaranteeApplication)
+    {
+        var submittedStep = new BidStatusStepDto
+        {
+            Label = "Bid Submitted",
+            Date = bid.CreatedAt.ToString("MMM d, yyyy"),
+            State = "completed"
+        };
+
+        var selectedStep = new BidStatusStepDto { Label = "Selected by Owner" };
+        var guaranteeStep = new BidStatusStepDto { Label = "Guarantee Approved" };
+        var completeStep = new BidStatusStepDto { Label = "Work Completed" };
+
+        switch (bid.Status)
+        {
+            case BidStatus.Submitted:
+                selectedStep.State = "pending";
+                break;
+
+            case BidStatus.PendingConfirmation:
+                selectedStep.State = "current";
+                break;
+
+            case BidStatus.NotSelected:
+                selectedStep.State = "rejected";
+                selectedStep.Date = bid.UpdatedAt.ToString("MMM d, yyyy");
+                break;
+
+            case BidStatus.Confirmed:
+                selectedStep.State = "completed";
+                selectedStep.Date = bid.UpdatedAt.ToString("MMM d, yyyy");
+                guaranteeStep.State = guaranteeApplication?.Status switch
+                {
+                    GuaranteeStatus.PendingBankReview => "current",
+                    GuaranteeStatus.Rejected => "rejected",
+                    _ => "pending" // no application submitted yet
+                };
+                if (guaranteeApplication != null)
+                    guaranteeStep.Date = guaranteeApplication.UpdatedAt.ToString("MMM d, yyyy");
+                break;
+
+            case BidStatus.InProgress:
+                selectedStep.State = "completed";
+                guaranteeStep.State = "completed";
+                if (guaranteeApplication != null)
+                    guaranteeStep.Date = guaranteeApplication.UpdatedAt.ToString("MMM d, yyyy");
+                break;
+
+            case BidStatus.Completed:
+                selectedStep.State = "completed";
+                guaranteeStep.State = "completed";
+                completeStep.State = "completed";
+                completeStep.Date = bid.UpdatedAt.ToString("MMM d, yyyy");
+                break;
+
+            case BidStatus.BackedOff:
+                // Best-effort: reflects that they'd at least been
+                // selected before backing off; doesn't distinguish how
+                // far past that they got. Revisit once this status is
+                // actually in scope for this screen.
+                selectedStep.State = "completed";
+                break;
+        }
+
+        return new List<BidStatusStepDto> { submittedStep, selectedStep, guaranteeStep, completeStep };
+    }
+
     private async Task<List<MyBidItemDto>> BuildMyBidsAsync(List<Bid> bids)
     {
         if (bids.Count == 0) return new List<MyBidItemDto>();
@@ -171,10 +299,28 @@ public class BidService : IBidService
         var ownerNames = await GetCompanyNamesAsync(
             bids.Where(b => projects.ContainsKey(b.ProjectId)).Select(b => projects[b.ProjectId].OwnerId));
 
+        // Confirmed bids may have a pending/rejected application (drives
+        // the CONFIRMED / GUARANTEE_PENDING_REVIEW / GUARANTEE_REJECTED
+        // split above); InProgress bids have an Approved one, whose
+        // ValidityExpiry drives GuaranteeExpiresInDays below. No other
+        // bid status can have an application (see
+        // GuaranteeService.ResolveConfirmedBidAsync).
+        var relevantBidIds = bids
+            .Where(b => b.Status == BidStatus.Confirmed || b.Status == BidStatus.InProgress)
+            .Select(b => b.Id)
+            .ToList();
+        var guaranteeApplications = relevantBidIds.Count == 0
+            ? new Dictionary<Guid, GuaranteeApplication>()
+            : await _db.GuaranteeApplications
+                .Where(g => relevantBidIds.Contains(g.BidId))
+                .GroupBy(g => g.BidId)
+                .ToDictionaryAsync(g => g.Key, g => g.OrderByDescending(x => x.CreatedAt).First());
+
         return bids.Select(b =>
         {
             projects.TryGetValue(b.ProjectId, out var project);
             ownerNames.TryGetValue(project?.OwnerId ?? Guid.Empty, out var companyName);
+            guaranteeApplications.TryGetValue(b.Id, out var guaranteeApplication);
 
             return new MyBidItemDto
             {
@@ -183,21 +329,40 @@ public class BidService : IBidService
                 ProjectTitle = project?.Title ?? string.Empty,
                 CompanyName = companyName ?? "Unknown",
                 BidAmountJod = b.BidAmountJod,
-                Status = BidStatusMapper.ToExternal(b.Status),
-                Note = b.Note ?? DefaultActiveNote(b.Status),
-                GuaranteeExpiresInDays = null // see BidDTOs.cs
+                Status = BidStatusMapper.ToExternal(b.Status, guaranteeApplication?.Status),
+                Note = b.Note ?? DefaultActiveNote(b.Status, guaranteeApplication?.Status),
+                GuaranteeExpiresInDays = GuaranteeExpiresInDays(b.Status, guaranteeApplication)
             };
         }).ToList();
     }
 
+    // Only meaningful once the guarantee is actually active (InProgress +
+    // an Approved application). Floors at 0 rather than going negative if
+    // ValidityExpiry has already passed — expiry-driven state transitions
+    // (e.g. auto-flagging an expired guarantee) aren't built yet, so an
+    // overdue guarantee just reads as "0 days left" for now rather than
+    // something misleading like -3.
+    private static int? GuaranteeExpiresInDays(string bidStatus, GuaranteeApplication? guaranteeApplication)
+    {
+        if (bidStatus != BidStatus.InProgress || guaranteeApplication?.Status != GuaranteeStatus.Approved)
+            return null;
+
+        var daysLeft = (guaranteeApplication.ValidityExpiry.Date - DateTime.UtcNow.Date).Days;
+        return Math.Max(daysLeft, 0);
+    }
+
     // Display text for the active states, when nothing's been explicitly
     // stored on the bid (Note is only ever persisted for terminal states).
-    private static string? DefaultActiveNote(string status) => status switch
+    // guaranteeStatus is null until a GuaranteeApplication exists for this
+    // bid — see BuildMyBidsAsync.
+    private static string? DefaultActiveNote(string status, string? guaranteeStatus) => (status, guaranteeStatus) switch
     {
-        BidStatus.Submitted => "Waiting for owner's decision",
-        BidStatus.PendingConfirmation => "Awarded to you — confirm to proceed",
-        BidStatus.Confirmed => "Waiting for guarantee approval",
-        BidStatus.InProgress => "Work in progress",
+        (BidStatus.Submitted, _) => "Waiting for owner's decision",
+        (BidStatus.PendingConfirmation, _) => "Awarded to you — confirm to proceed",
+        (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview) => "Guarantee application submitted — waiting on bank review",
+        (BidStatus.Confirmed, GuaranteeStatus.Rejected) => "Your guarantee application was rejected. Apply for a new one or back off.",
+        (BidStatus.Confirmed, _) => "Confirmed — apply for your guarantee to proceed",
+        (BidStatus.InProgress, _) => "Work in progress",
         _ => null
     };
 
@@ -232,18 +397,39 @@ public class BidService : IBidService
 // Maps internal snake_case Bid.Status values onto the external My Bids
 // API vocabulary. Kept separate from ProjectService's simple
 // .ToUpperInvariant() convention because the mapping here isn't 1:1
-// (PendingConfirmation -> SELECTED, BackedOff -> WITHDRAWN, etc.).
+// (PendingConfirmation -> SELECTED, BackedOff -> BACKED_OFF, etc.).
 public static class BidStatusMapper
 {
-    public static string ToExternal(string internalStatus) => internalStatus switch
+    // guaranteeStatus is the related GuaranteeApplication's Status (null if
+    // no application has been submitted yet for this bid). Only relevant
+    // while internalStatus == Confirmed — a bid can't have an application
+    // in any other state (see GuaranteeService.ResolveConfirmedBidAsync).
+    //
+    // Confirmed splits into three external states so the frontend doesn't
+    // have to infer any of this from Note text:
+    //   - CONFIRMED: bid confirmed, contractor hasn't applied for the
+    //     guarantee yet — "Apply for Guarantee" button state.
+    //   - GUARANTEE_PENDING_REVIEW: application submitted, bank hasn't
+    //     decided yet.
+    //   - GUARANTEE_REJECTED: bank rejected the application — "Back Off"
+    //     / "Apply for New Guarantee" button state. Bid.Status itself
+    //     stays Confirmed here (see GuaranteeService.RejectAsync); this
+    //     is a read-side-only distinction driven by the linked
+    //     GuaranteeApplication's Status.
+    // On approval the bid moves to a real BidStatus (InProgress) instead
+    // of staying Confirmed, so there's no "GUARANTEE_APPROVED" case here —
+    // (BidStatus.InProgress, _) below already covers it.
+    public static string ToExternal(string internalStatus, string? guaranteeStatus = null) => (internalStatus, guaranteeStatus) switch
     {
-        BidStatus.Submitted => "PENDING",
-        BidStatus.PendingConfirmation => "SELECTED",
-        BidStatus.Confirmed => "CONFIRMED",
-        BidStatus.InProgress => "IN_PROGRESS",
-        BidStatus.NotSelected => "REJECTED",
-        BidStatus.BackedOff => "WITHDRAWN",
-        BidStatus.Completed => "COMPLETED",
+        (BidStatus.Submitted, _) => "PENDING",
+        (BidStatus.PendingConfirmation, _) => "SELECTED",
+        (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview) => "GUARANTEE_PENDING_REVIEW",
+        (BidStatus.Confirmed, GuaranteeStatus.Rejected) => "GUARANTEE_REJECTED",
+        (BidStatus.Confirmed, _) => "CONFIRMED",
+        (BidStatus.InProgress, _) => "IN_PROGRESS",
+        (BidStatus.NotSelected, _) => "REJECTED",
+        (BidStatus.BackedOff, _) => "BACKED_OFF",
+        (BidStatus.Completed, _) => "COMPLETED",
         _ => internalStatus.ToUpperInvariant()
     };
 }

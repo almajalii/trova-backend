@@ -1,11 +1,15 @@
 namespace TrovaBackend.Models;
 
-// Only one state exists in this pass — the bank-review workflow (approve /
-// reject / active / expired / claimed) isn't modelled yet, same "build the
-// table now, wire the rest later" approach as Bid/Project statuses.
+// Bank-review workflow: pending_bank_review -> approved | rejected.
+// Approved/expired/claimed lifecycle beyond that (guarantee going live,
+// expiring, being claimed against) still isn't modelled — only the
+// decision itself, which is what MyBids' Confirmed/InProgress/Rejected
+// display states need.
 public static class GuaranteeStatus
 {
     public const string PendingBankReview = "pending_bank_review";
+    public const string Approved = "approved";
+    public const string Rejected = "rejected";
 }
 
 // Internal storage is SCREAMING_SNAKE, matching the external vocabulary

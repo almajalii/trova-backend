@@ -7,8 +7,9 @@ namespace TrovaBackend.Models;
 //
 // External API vocabulary (My Bids feature) maps onto these internal
 // values as: Submitted->PENDING, PendingConfirmation->SELECTED,
-// Confirmed->CONFIRMED, InProgress->IN_PROGRESS, NotSelected->REJECTED,
-// BackedOff->WITHDRAWN, Completed->COMPLETED. See
+// Confirmed->CONFIRMED (or GUARANTEE_PENDING_REVIEW once a
+// GuaranteeApplication exists for the bid), InProgress->IN_PROGRESS,
+// NotSelected->REJECTED, BackedOff->BACKED_OFF, Completed->COMPLETED. See
 // BidStatusMapper.ToExternal in BidService.cs.
 public static class BidStatus
 {

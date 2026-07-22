@@ -93,13 +93,16 @@ public class ProjectService : IProjectService
 
         var bidCounts = await GetBidCountsAsync(projects.Select(p => p.Id));
         var (awardedBids, contractorNames) = await GetAwardedBidContextAsync(projects);
+        var guaranteeApps = await GetLatestGuaranteeApplicationsAsync(projects.Select(p => p.Id));
 
         return projects.Select(p =>
         {
             bidCounts.TryGetValue(p.Id, out var bidCount);
             var awardedBid = ResolveAwardedBid(p, awardedBids);
             var contractorName = ResolveContractorName(awardedBid, contractorNames);
-            var fields = BuildActiveListFields(p.Status, bidCount, awardedBid, contractorName);
+            guaranteeApps.TryGetValue(p.Id, out var guaranteeApp);
+            var fields = BuildActiveListFields(p.Status, bidCount, awardedBid, contractorName, guaranteeApp);
+            var strip = BuildGuaranteeStrip(p.Status, guaranteeApp);
 
             return new ProjectListItemDto
             {
@@ -108,12 +111,9 @@ public class ProjectService : IProjectService
                 Status = p.Status.ToUpperInvariant(),
                 ContractValueJod = p.ContractValueJod,
                 DetailText = fields.DetailText,
-                // No project-level guarantee/bank data is modelled yet
-                // (BankConnection is per-user, not per-project) — always
-                // null for now. Wire these up once Guarantee Review lands.
-                GuaranteeStripLabel = null,
-                GuaranteeStripSubtext = null,
-                GuaranteeStripTone = null,
+                GuaranteeStripLabel = strip.Label,
+                GuaranteeStripSubtext = strip.Subtext,
+                GuaranteeStripTone = strip.Tone,
                 Note = null,
                 ActionLabel = fields.ActionLabel
             };
@@ -184,7 +184,19 @@ public class ProjectService : IProjectService
         }
 
         var bidCount = await _db.Bids.CountAsync(b => b.ProjectId == project.Id);
+        var guaranteeApp = await _db.GuaranteeApplications
+            .Where(g => g.ProjectId == project.Id)
+            .OrderByDescending(g => g.CreatedAt)
+            .FirstOrDefaultAsync();
         var (statusLabel, actionLabel, actionIsDanger) = GetStatusMeta(project.Status);
+
+        // GetStatusMeta doesn't know about GuaranteeApplication state —
+        // this is the one place that context gets layered on top of the
+        // generic per-status action label.
+        if (project.Status == ProjectStatus.Awarded && guaranteeApp?.Status == GuaranteeStatus.PendingBankReview)
+        {
+            actionLabel = "Review Guarantee";
+        }
 
         return new ProjectDetailDto
         {
@@ -203,12 +215,7 @@ public class ProjectService : IProjectService
             BiddersRowText = project.Status == ProjectStatus.OpenForBids
                 ? $"{bidCount} bidder{(bidCount == 1 ? "" : "s")}"
                 : null,
-            // No guarantee expiry/status data modelled per-project yet —
-            // only a coarse "awaiting issuance" hint once the contractor
-            // has confirmed. Real dates land with the Guarantee feature.
-            GuaranteeRowText = project.Status == ProjectStatus.Awarded && awardedBid?.Status == BidStatus.Confirmed
-                ? "Awaiting guarantee issuance"
-                : null,
+            GuaranteeRowText = BuildGuaranteeRowText(project.Status, awardedBid, guaranteeApp),
             Timeline = BuildTimeline(project, awardedBid),
             ActionLabel = actionLabel,
             ActionIsDanger = actionIsDanger
@@ -281,13 +288,34 @@ public class ProjectService : IProjectService
         return names;
     }
 
+    // Latest (most recent) GuaranteeApplication per project — a rejected
+    // application can be followed by a fresh resubmission after the
+    // contractor applies again, and only the newest one is "live" for
+    // badges/action labels. Grouping by ProjectId rather than BidId since
+    // that's what every caller here already has on hand.
+    private async Task<Dictionary<Guid, GuaranteeApplication>> GetLatestGuaranteeApplicationsAsync(IEnumerable<Guid> projectIds)
+    {
+        var ids = projectIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, GuaranteeApplication>();
+
+        var apps = await _db.GuaranteeApplications
+            .Where(g => ids.Contains(g.ProjectId))
+            .OrderByDescending(g => g.CreatedAt)
+            .ToListAsync();
+
+        return apps.GroupBy(g => g.ProjectId).ToDictionary(g => g.Key, g => g.First());
+    }
+
     private static (string? DetailText, string? ActionLabel) BuildActiveListFields(
-        string status, int bidCount, Bid? awardedBid, string? contractorName)
+        string status, int bidCount, Bid? awardedBid, string? contractorName, GuaranteeApplication? guaranteeApp)
     {
         return status switch
         {
             ProjectStatus.OpenForBids =>
                 ($"{bidCount} bidder{(bidCount == 1 ? "" : "s")}", null),
+
+            ProjectStatus.Awarded when guaranteeApp?.Status == GuaranteeStatus.PendingBankReview =>
+                ($"Awarded to {contractorName ?? "contractor"} — guarantee ready for review", "Review Guarantee"),
 
             ProjectStatus.Awarded when awardedBid?.Status == BidStatus.Confirmed =>
                 ($"Awarded to {contractorName ?? "contractor"} — waiting for guarantee", null),
@@ -309,6 +337,45 @@ public class ProjectService : IProjectService
 
             _ => (null, null)
         };
+    }
+
+    // Colored strip on the My Projects card — only ever shown for the two
+    // states that have a guarantee worth calling out (see
+    // GuaranteeStripTone in my_projects_model.dart: SUCCESS | WARNING).
+    private static (string? Label, string? Subtext, string? Tone) BuildGuaranteeStrip(
+        string status, GuaranteeApplication? guaranteeApp)
+    {
+        if (guaranteeApp == null) return (null, null, null);
+
+        return (status, guaranteeApp.Status) switch
+        {
+            (ProjectStatus.Awarded, GuaranteeStatus.PendingBankReview) =>
+                ("Guarantee: Ready for Review", "Bank has issued it", "WARNING"),
+
+            (ProjectStatus.InProgress, GuaranteeStatus.Approved) =>
+                ("Guarantee: Active", $"Expires {guaranteeApp.ValidityExpiry:MMM yyyy}", "SUCCESS"),
+
+            _ => (null, null, null)
+        };
+    }
+
+    // Project Detail's single guarantee row. Keeps the original "awaiting
+    // issuance" fallback for when the contractor's confirmed but hasn't
+    // submitted an application yet, and adds the two guarantee-app-driven
+    // cases on top.
+    private static string? BuildGuaranteeRowText(string status, Bid? awardedBid, GuaranteeApplication? guaranteeApp)
+    {
+        if (status == ProjectStatus.Awarded && awardedBid?.Status == BidStatus.Confirmed)
+        {
+            return guaranteeApp?.Status == GuaranteeStatus.PendingBankReview
+                ? "Ready for your review"
+                : "Awaiting guarantee issuance";
+        }
+
+        if (status == ProjectStatus.InProgress && guaranteeApp?.Status == GuaranteeStatus.Approved)
+            return $"Active · Expires {guaranteeApp.ValidityExpiry:MMM yyyy}";
+
+        return null;
     }
 
     private static (string Label, string? ActionLabel, bool ActionIsDanger) GetStatusMeta(string status) =>

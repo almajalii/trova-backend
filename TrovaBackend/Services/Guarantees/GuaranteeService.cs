@@ -113,6 +113,23 @@ public class GuaranteeService : IGuaranteeService
         return (project, bid);
     }
 
+    // Blocks re-applying while a decision is still outstanding or already
+    // went the contractor's way. Rejected is deliberately NOT blocking —
+    // "Apply for New Guarantee" after a rejection is the whole point of
+    // that state (see BidStatusMapper). Approved blocks because the bid
+    // has already moved to InProgress by then anyway (ResolveConfirmedBidAsync
+    // would have rejected it first), but checking here too keeps this
+    // guard correct on its own if that ordering ever changes.
+    private async Task EnsureNoActiveApplicationAsync(Guid bidId)
+    {
+        var blockingStatuses = new[] { GuaranteeStatus.PendingBankReview, GuaranteeStatus.Approved };
+        var hasActive = await _db.GuaranteeApplications
+            .AnyAsync(g => g.BidId == bidId && blockingStatuses.Contains(g.Status));
+
+        if (hasActive)
+            throw new InvalidOperationException("A guarantee application is already pending or approved for this bid.");
+    }
+
     // Random 4-digit code, checked against CompanyDetails for collisions
     // and retried, persisted once generated — same "generate, verify
     // uniqueness, persist" shape as ProjectService.GenerateUniqueProjectCodeAsync.
@@ -157,6 +174,7 @@ public class GuaranteeService : IGuaranteeService
             throw new ArgumentException("projectId is required.");
 
         var (project, bid) = await ResolveConfirmedBidAsync(contractorId, request.ProjectId);
+        await EnsureNoActiveApplicationAsync(bid.Id);
 
         var guaranteeType = ParseGuaranteeType(request.GuaranteeType);
         var guaranteedAmount = ParseAmount(request.GuaranteedAmount);
@@ -313,5 +331,167 @@ public class GuaranteeService : IGuaranteeService
         });
 
         await _db.SaveChangesAsync();
+    }
+
+    // ── Owner-side read ──────────────────────────────────────────────────
+
+    public async Task<OwnerGuaranteeDto?> GetOwnerGuaranteeAsync(Guid ownerId, string projectId)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.OwnerId == ownerId && p.ProjectCode == projectId);
+        if (project == null) return null;
+
+        var application = await _db.GuaranteeApplications
+            .Where(g => g.ProjectId == project.Id)
+            .OrderByDescending(g => g.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (application == null) return null;
+
+        return await BuildOwnerGuaranteeDtoAsync(application, project);
+    }
+
+    // ── Decision ─────────────────────────────────────────────────────────
+    // No real bank sits behind these yet — same stopgap situation as
+    // MockJofsDataProvider on the BankConnection side. The decision is,
+    // in practice, the project owner's: they're the one reviewing what
+    // the contractor's bank issued and choosing to approve or reject it.
+    // Scoped to ownerId so only that project's beneficiary can decide.
+
+    public async Task<OwnerGuaranteeDto> ApproveAsync(Guid ownerId, string applicationCode)
+    {
+        var (application, project) = await GetPendingApplicationOrThrowAsync(ownerId, applicationCode);
+
+        application.Status = GuaranteeStatus.Approved;
+        application.UpdatedAt = DateTime.UtcNow;
+
+        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == application.BidId);
+        if (bid == null)
+            throw new KeyNotFoundException("Bid not found for this guarantee application.");
+
+        // Confirmed -> InProgress: the transition nothing else in this
+        // codebase makes yet (see the comment on BidStatus.InProgress).
+        bid.Status = BidStatus.InProgress;
+        bid.Note = null; // derives "Work in progress" at read time
+        bid.UpdatedAt = DateTime.UtcNow;
+
+        // Project.Status previously never left Awarded on approval — the
+        // bid moved to InProgress but nothing flipped the project, so My
+        // Projects/Project Detail kept showing it stuck under "Awarded"
+        // forever. This is the missing transition.
+        project.Status = ProjectStatus.InProgress;
+        project.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        return await BuildOwnerGuaranteeDtoAsync(application, project);
+    }
+
+    public async Task<OwnerGuaranteeDto> RejectAsync(Guid ownerId, string applicationCode)
+    {
+        var (application, project) = await GetPendingApplicationOrThrowAsync(ownerId, applicationCode);
+
+        application.Status = GuaranteeStatus.Rejected;
+        application.UpdatedAt = DateTime.UtcNow;
+
+        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == application.BidId);
+        if (bid == null)
+            throw new KeyNotFoundException("Bid not found for this guarantee application.");
+
+        // Bid.Status stays Confirmed on purpose — "Guarantee Rejected" is
+        // a display state layered on top via BidStatusMapper, not a
+        // separate BidStatus, because the contractor's still mid-flow on
+        // this same confirmed bid (Back Off or apply again). Only the
+        // Project flips here, so BackOffBidAsync's existing
+        // GuaranteeRejectedByYou check produces the right note if/when
+        // the contractor does back off.
+        project.Status = ProjectStatus.GuaranteeRejectedByYou;
+        project.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        return await BuildOwnerGuaranteeDtoAsync(application, project);
+    }
+
+    // Loads the application and enforces that the caller is the project's
+    // beneficiary (owner). A non-owner (or a nonexistent application) gets
+    // the same 404 either way — never leaks whether an application exists
+    // to someone who isn't the beneficiary, same pattern as
+    // ResolveConfirmedBidAsync on the contractor side.
+    private async Task<(GuaranteeApplication application, Project project)> GetPendingApplicationOrThrowAsync(
+        Guid ownerId, string applicationCode)
+    {
+        var application = await _db.GuaranteeApplications
+            .FirstOrDefaultAsync(g => g.ApplicationCode == applicationCode);
+
+        if (application == null || application.BeneficiaryId != ownerId)
+            throw new KeyNotFoundException("Guarantee application not found.");
+
+        if (application.Status != GuaranteeStatus.PendingBankReview)
+            throw new InvalidOperationException("This application has already been decided.");
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == application.ProjectId);
+        if (project == null)
+            throw new KeyNotFoundException("Project not found for this guarantee application.");
+
+        return (application, project);
+    }
+
+    // Maps internal Status/GuaranteeType storage onto the external
+    // vocabulary guarantee_review_model.dart expects. Kept next to
+    // GuaranteeTypeFromFrontend at the top of this class conceptually,
+    // just the reverse direction (internal -> display) rather than
+    // parse (frontend -> internal).
+    private static readonly Dictionary<string, string> GuaranteeTypeDisplayLabel = new()
+    {
+        [GuaranteeTypes.Performance] = "Performance Guarantee",
+        [GuaranteeTypes.BidBond] = "Bid Bond Guarantee",
+        [GuaranteeTypes.AdvancePayment] = "Advance Payment Guarantee",
+        [GuaranteeTypes.Retention] = "Retention Guarantee",
+    };
+
+    private static string ExternalGuaranteeStatus(string status) => status switch
+    {
+        GuaranteeStatus.PendingBankReview => "PENDING_REVIEW",
+        GuaranteeStatus.Approved => "ACTIVE",
+        GuaranteeStatus.Rejected => "REJECTED",
+        _ => status.ToUpperInvariant(),
+    };
+
+    private async Task<OwnerGuaranteeDto> BuildOwnerGuaranteeDtoAsync(GuaranteeApplication application, Project project)
+    {
+        var contractorCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == application.ContractorId);
+        var contractorName = contractorCompany != null
+            ? (string.IsNullOrWhiteSpace(contractorCompany.TradingName) ? contractorCompany.LegalCompanyName : contractorCompany.TradingName)
+            : (await _db.Users.FirstOrDefaultAsync(u => u.Id == application.ContractorId))?.Name ?? "Unknown";
+
+        var beneficiaryCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == application.BeneficiaryId);
+        var beneficiaryName = beneficiaryCompany != null
+            ? (string.IsNullOrWhiteSpace(beneficiaryCompany.TradingName) ? beneficiaryCompany.LegalCompanyName : beneficiaryCompany.TradingName)
+            : (await _db.Users.FirstOrDefaultAsync(u => u.Id == application.BeneficiaryId))?.Name ?? "You";
+
+        // The contractor's connected bank issues the guarantee — same
+        // BankConnection row CapabilityScore/BankConnectionController
+        // already read from. Falls back gracefully if the contractor
+        // somehow submitted without one connected (shouldn't happen in
+        // practice, but never worth a 500 over a display field).
+        var bankConnection = await _db.BankConnections.FirstOrDefaultAsync(b => b.UserId == application.ContractorId);
+
+        return new OwnerGuaranteeDto
+        {
+            GuaranteeId = application.ApplicationCode,
+            ProjectId = project.ProjectCode,
+            ProjectTitle = project.Title,
+            ContractorName = contractorName,
+            Beneficiary = $"{beneficiaryName} (You)",
+            IssuingBank = bankConnection?.BankName ?? "Bank not yet connected",
+            AmountJod = application.GuaranteedAmount,
+            Type = GuaranteeTypeDisplayLabel.GetValueOrDefault(application.GuaranteeType, application.GuaranteeType),
+            Status = ExternalGuaranteeStatus(application.Status),
+            IssueDate = application.Status == GuaranteeStatus.Approved
+                ? application.UpdatedAt.ToString("yyyy-MM-dd")
+                : null,
+            ValidUntil = application.ValidityExpiry.ToString("yyyy-MM-dd"),
+            ClaimDate = null, // claim lifecycle isn't modelled yet
+        };
     }
 }
