@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<Models.Bid> Bids => Set<Models.Bid>();
     public DbSet<Models.GuaranteeApplication> GuaranteeApplications => Set<Models.GuaranteeApplication>();
     public DbSet<Models.GuaranteeDocument> GuaranteeDocuments => Set<Models.GuaranteeDocument>();
+    public DbSet<Models.Review> Reviews => Set<Models.Review>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -77,6 +78,13 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Models.GuaranteeDocument>(entity =>
         {
             entity.HasIndex(d => d.GuaranteeApplicationId);
+        });
+
+        modelBuilder.Entity<Models.Review>(entity =>
+        {
+            // One review per project — see the comment on Review.ProjectId.
+            entity.HasIndex(r => r.ProjectId).IsUnique();
+            entity.HasIndex(r => r.RevieweeId);
         });
 
         // Add further entity configuration here as the domain grows.

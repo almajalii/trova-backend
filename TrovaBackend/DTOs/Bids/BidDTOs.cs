@@ -13,7 +13,7 @@ public class MyBidItemDto
     public decimal BidAmountJod { get; set; }
 
     // PENDING | SELECTED | CONFIRMED | GUARANTEE_PENDING_REVIEW |
-    // GUARANTEE_REJECTED | IN_PROGRESS
+    // GUARANTEE_REJECTED | IN_PROGRESS | WORK_SUBMITTED
     //
     // CONFIRMED, GUARANTEE_PENDING_REVIEW, and GUARANTEE_REJECTED are all
     // "bid confirmed, guarantee not yet approved" — they only differ on
@@ -21,7 +21,10 @@ public class MyBidItemDto
     // see BidStatusMapper.ToExternal). Don't infer this split from Note
     // text; Note is free-form display copy and can change independently.
     // Once approved the bid itself moves to IN_PROGRESS — there's no
-    // separate "GUARANTEE_APPROVED" bid status.
+    // separate "GUARANTEE_APPROVED" bid status. WORK_SUBMITTED is the
+    // same underlying Bid.Status (InProgress) as IN_PROGRESS, split out
+    // once WorkSubmittedAt is set — "Mark Work as Done" should disappear
+    // and something like "Awaiting Owner Review" should render instead.
     public string Status { get; set; } = string.Empty;
 
     public string? Note { get; set; }
@@ -33,6 +36,12 @@ public class MyBidItemDto
     // shouldn't happen given how a bid reaches InProgress today, but
     // isn't asserted against).
     public int? GuaranteeExpiresInDays { get; set; }
+
+    // "yyyy-MM-dd", set once the contractor calls POST /bids/{id}/work-done.
+    // Only present when Status == WORK_SUBMITTED; the Status field alone
+    // is enough to drive UI state, this is here in case the date itself
+    // is useful to show.
+    public string? WorkSubmittedAt { get; set; }
 }
 
 // ── My Bids History (closed) — GET /api/bids/history ────────────────────
@@ -50,10 +59,10 @@ public class BidHistoryItemDto
     // Required for REJECTED/BACKED_OFF, null for COMPLETED.
     public string? Note { get; set; }
 
-    // Only ever populated on COMPLETED bids, once the owner has left a
-    // review. Always null for now — no Review entity exists in the schema
-    // yet, and the empty-state ("completed but not yet reviewed") design
-    // still needs product input per the handoff notes.
+    // Populated once the owner has left a review for this completed
+    // project (via LeaveReviewService.SubmitReviewAsync). Null for the
+    // "completed but not yet reviewed" empty state — that's a real state,
+    // not a gap, so it's left to the frontend to render accordingly.
     public BidReviewDto? Review { get; set; }
 }
 
@@ -95,14 +104,17 @@ public class BidDetailDto
     // non-null when Status == IN_PROGRESS with an Approved application.
     public int? GuaranteeExpiresInDays { get; set; }
 
+    // Same as MyBidItemDto.WorkSubmittedAt.
+    public string? WorkSubmittedAt { get; set; }
+
     // Populated for REJECTED (owner picked someone else) and
     // GUARANTEE_REJECTED (bank rejected the application) — reuses
     // Bid.Note / the same rejection copy those statuses already carry
     // elsewhere. Null for every other status.
     public string? BannerNote { get; set; }
 
-    // Always null — no Review entity exists in this schema yet, same gap
-    // documented on BidHistoryItemDto.Review. Not faked here either.
+    // Populated once the owner has left a review for this completed bid —
+    // same empty-state reasoning as BidHistoryItemDto.Review.
     public int? ReviewRating { get; set; }
     public string? ReviewText { get; set; }
 }

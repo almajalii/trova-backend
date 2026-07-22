@@ -50,10 +50,24 @@ public class BidService : IBidService
         var ownerNames = await GetCompanyNamesAsync(
             bids.Where(b => projects.ContainsKey(b.ProjectId)).Select(b => projects[b.ProjectId].OwnerId));
 
+        // Only Completed bids can have one — a review requires the
+        // project to have actually reached Completed (see
+        // LeaveReviewService.SubmitReviewAsync).
+        var completedProjectIds = bids
+            .Where(b => b.Status == BidStatus.Completed && projects.ContainsKey(b.ProjectId))
+            .Select(b => projects[b.ProjectId].Id)
+            .ToList();
+        var reviews = completedProjectIds.Count == 0
+            ? new Dictionary<Guid, Review>()
+            : await _db.Reviews
+                .Where(r => completedProjectIds.Contains(r.ProjectId))
+                .ToDictionaryAsync(r => r.ProjectId);
+
         return bids.Select(b =>
         {
             projects.TryGetValue(b.ProjectId, out var project);
             ownerNames.TryGetValue(project?.OwnerId ?? Guid.Empty, out var companyName);
+            var review = project != null && reviews.TryGetValue(project.Id, out var r) ? r : null;
 
             return new BidHistoryItemDto
             {
@@ -64,8 +78,10 @@ public class BidService : IBidService
                 BidAmountJod = b.BidAmountJod,
                 Status = BidStatusMapper.ToExternal(b.Status),
                 Note = b.Status == BidStatus.Completed ? null : b.Note,
-                // No Review entity yet — see BidDTOs.cs.
-                Review = null
+                // Present once the owner has actually left a review — the
+                // empty state (completed but not yet reviewed) is just
+                // Review == null, no separate flag needed.
+                Review = review != null ? new BidReviewDto { Stars = ComputeStars(review), Comment = review.Comment } : null
             };
         }).ToList();
     }
@@ -139,9 +155,10 @@ public class BidService : IBidService
         return await GetMyBidsAsync(contractorId);
     }
 
-    // Doesn't change Bid.Status — stays InProgress. Just stamps the
-    // project's SubmittedDate, which GET /projects/{id}/submitted-work
-    // (not built in this pass) will read off.
+    // Doesn't change Bid.Status — stays InProgress (Completed is reserved
+    // for once the owner actually confirms the work, via ReviewWorkService.
+    // ConfirmCompleteAsync). Stamps the project's SubmittedDate and flips
+    // it to PendingReview, which GET /projects/{id}/submitted-work reads.
     public async Task<List<MyBidItemDto>?> MarkWorkDoneAsync(Guid contractorId, Guid bidId)
     {
         var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == bidId && b.ContractorId == contractorId);
@@ -153,7 +170,11 @@ public class BidService : IBidService
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == bid.ProjectId);
         if (project == null) return null;
 
+        bid.WorkSubmittedAt = DateTime.UtcNow;
+        bid.UpdatedAt = DateTime.UtcNow;
+
         project.SubmittedDate = DateTime.UtcNow;
+        project.Status = ProjectStatus.PendingReview;
         project.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -181,7 +202,12 @@ public class BidService : IBidService
                 .FirstOrDefaultAsync()
             : null;
 
-        var externalStatus = BidStatusMapper.ToExternal(bid.Status, guaranteeApplication?.Status);
+        var externalStatus = BidStatusMapper.ToExternal(bid.Status, guaranteeApplication?.Status, bid.WorkSubmittedAt);
+
+        // Only Completed bids can have one — same scoping as GetHistoryAsync.
+        var review = bid.Status == BidStatus.Completed
+            ? await _db.Reviews.FirstOrDefaultAsync(r => r.ProjectId == project.Id)
+            : null;
 
         return new BidDetailDto
         {
@@ -204,14 +230,16 @@ public class BidService : IBidService
             Description = string.IsNullOrWhiteSpace(project.Description) ? null : project.Description,
 
             GuaranteeExpiresInDays = GuaranteeExpiresInDays(bid.Status, guaranteeApplication),
+            WorkSubmittedAt = bid.WorkSubmittedAt?.ToString("yyyy-MM-dd"),
 
             BannerNote = (externalStatus == "REJECTED" || externalStatus == "GUARANTEE_REJECTED")
                 ? (bid.Note ?? DefaultActiveNote(bid.Status, guaranteeApplication?.Status))
                 : null,
 
-            // No Review entity yet — see BidDTOs.cs.
-            ReviewRating = null,
-            ReviewText = null
+            // Null until the owner's actually left a review — same empty
+            // state as BidHistoryItemDto.Review.
+            ReviewRating = review != null ? ComputeStars(review) : null,
+            ReviewText = review?.Comment
         };
     }
 
@@ -267,6 +295,15 @@ public class BidService : IBidService
                 guaranteeStep.State = "completed";
                 if (guaranteeApplication != null)
                     guaranteeStep.Date = guaranteeApplication.UpdatedAt.ToString("MMM d, yyyy");
+                // Work submitted but not yet confirmed by the owner —
+                // "current" rather than leaving it looking untouched.
+                // Actually confirmed (bid.Status == Completed) is the
+                // case below.
+                if (bid.WorkSubmittedAt.HasValue)
+                {
+                    completeStep.State = "current";
+                    completeStep.Date = bid.WorkSubmittedAt.Value.ToString("MMM d, yyyy");
+                }
                 break;
 
             case BidStatus.Completed:
@@ -329,9 +366,10 @@ public class BidService : IBidService
                 ProjectTitle = project?.Title ?? string.Empty,
                 CompanyName = companyName ?? "Unknown",
                 BidAmountJod = b.BidAmountJod,
-                Status = BidStatusMapper.ToExternal(b.Status, guaranteeApplication?.Status),
+                Status = BidStatusMapper.ToExternal(b.Status, guaranteeApplication?.Status, b.WorkSubmittedAt),
                 Note = b.Note ?? DefaultActiveNote(b.Status, guaranteeApplication?.Status),
-                GuaranteeExpiresInDays = GuaranteeExpiresInDays(b.Status, guaranteeApplication)
+                GuaranteeExpiresInDays = GuaranteeExpiresInDays(b.Status, guaranteeApplication),
+                WorkSubmittedAt = b.WorkSubmittedAt?.ToString("yyyy-MM-dd")
             };
         }).ToList();
     }
@@ -365,6 +403,18 @@ public class BidService : IBidService
         (BidStatus.InProgress, _) => "Work in progress",
         _ => null
     };
+
+    // BidReviewDto.Stars is a single number; Review stores six separate
+    // 1-5 categories (see leave_review_model.dart's ReviewCategory). This
+    // is the average, rounded to the nearest whole star — WouldYouRehire
+    // included, same as every other category, since the frontend rates
+    // it 1-5 too rather than treating it as a yes/no.
+    private static int ComputeStars(Review review)
+    {
+        var average = (review.QualityOfWorkmanship + review.AdherenceToTimeline + review.AdherenceToBudgetScope +
+                        review.CommunicationResponsiveness + review.SiteSafetyCompliance + review.WouldYouRehire) / 6.0;
+        return (int)Math.Round(average, MidpointRounding.AwayFromZero);
+    }
 
     // Same pattern as GetContractorNamesAsync in ProjectService — generic
     // by userId, works for resolving project owners' company names here.
@@ -405,6 +455,12 @@ public static class BidStatusMapper
     // while internalStatus == Confirmed — a bid can't have an application
     // in any other state (see GuaranteeService.ResolveConfirmedBidAsync).
     //
+    // workSubmittedAt is Bid.WorkSubmittedAt — only relevant while
+    // internalStatus == InProgress. Distinguishes "guarantee active, work
+    // underway" (IN_PROGRESS) from "contractor marked it done, waiting on
+    // the owner to confirm/flag" (WORK_SUBMITTED), which the bid-side
+    // DTOs previously had no way to signal at all.
+    //
     // Confirmed splits into three external states so the frontend doesn't
     // have to infer any of this from Note text:
     //   - CONFIRMED: bid confirmed, contractor hasn't applied for the
@@ -419,17 +475,19 @@ public static class BidStatusMapper
     // On approval the bid moves to a real BidStatus (InProgress) instead
     // of staying Confirmed, so there's no "GUARANTEE_APPROVED" case here —
     // (BidStatus.InProgress, _) below already covers it.
-    public static string ToExternal(string internalStatus, string? guaranteeStatus = null) => (internalStatus, guaranteeStatus) switch
-    {
-        (BidStatus.Submitted, _) => "PENDING",
-        (BidStatus.PendingConfirmation, _) => "SELECTED",
-        (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview) => "GUARANTEE_PENDING_REVIEW",
-        (BidStatus.Confirmed, GuaranteeStatus.Rejected) => "GUARANTEE_REJECTED",
-        (BidStatus.Confirmed, _) => "CONFIRMED",
-        (BidStatus.InProgress, _) => "IN_PROGRESS",
-        (BidStatus.NotSelected, _) => "REJECTED",
-        (BidStatus.BackedOff, _) => "BACKED_OFF",
-        (BidStatus.Completed, _) => "COMPLETED",
-        _ => internalStatus.ToUpperInvariant()
-    };
+    public static string ToExternal(string internalStatus, string? guaranteeStatus = null, DateTime? workSubmittedAt = null) =>
+        (internalStatus, guaranteeStatus, workSubmittedAt.HasValue) switch
+        {
+            (BidStatus.Submitted, _, _) => "PENDING",
+            (BidStatus.PendingConfirmation, _, _) => "SELECTED",
+            (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview, _) => "GUARANTEE_PENDING_REVIEW",
+            (BidStatus.Confirmed, GuaranteeStatus.Rejected, _) => "GUARANTEE_REJECTED",
+            (BidStatus.Confirmed, _, _) => "CONFIRMED",
+            (BidStatus.InProgress, _, true) => "WORK_SUBMITTED",
+            (BidStatus.InProgress, _, _) => "IN_PROGRESS",
+            (BidStatus.NotSelected, _, _) => "REJECTED",
+            (BidStatus.BackedOff, _, _) => "BACKED_OFF",
+            (BidStatus.Completed, _, _) => "COMPLETED",
+            _ => internalStatus.ToUpperInvariant()
+        };
 }

@@ -61,6 +61,14 @@ public class Bid
     // time instead of being stored.
     public string? Note { get; set; }
 
+    // Set by MarkWorkDoneAsync alongside the Project.Status flip to
+    // PendingReview. Bid.Status deliberately stays InProgress (Completed
+    // is reserved for the owner's confirm-complete step), so without this
+    // the frontend had no server-provided way to tell "in progress, not
+    // yet submitted" apart from "in progress, awaiting owner review" —
+    // see BidStatusMapper.ToExternal's WORK_SUBMITTED case.
+    public DateTime? WorkSubmittedAt { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

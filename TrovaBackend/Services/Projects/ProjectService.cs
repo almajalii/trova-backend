@@ -79,7 +79,11 @@ public class ProjectService : IProjectService
 
     private static readonly string[] HistoryStatuses =
     {
-        ProjectStatus.Completed, ProjectStatus.Disputed, ProjectStatus.Failed
+        ProjectStatus.Completed, ProjectStatus.Disputed, ProjectStatus.Failed,
+        // Set by RepostProjectService once the owner reposts — the
+        // original drops out of the active list but stays visible here
+        // rather than disappearing outright.
+        ProjectStatus.Cancelled
     };
 
     public async Task<List<ProjectListItemDto>> GetMyProjectsAsync(Guid ownerId)
@@ -145,6 +149,7 @@ public class ProjectService : IProjectService
                 ProjectStatus.Completed => $"Completed {p.UpdatedAt:MMMM yyyy}",
                 ProjectStatus.Disputed or ProjectStatus.Failed when contractorName != null
                     => $"Contractor: {contractorName}",
+                ProjectStatus.Cancelled => $"Reposted {p.UpdatedAt:MMMM yyyy}",
                 _ => null
             };
 
@@ -390,6 +395,7 @@ public class ProjectService : IProjectService
             ProjectStatus.Completed => ("Completed", null, false),
             ProjectStatus.Disputed => ("Disputed", "View Dispute Status", false),
             ProjectStatus.Failed => ("Failed", "View Guarantee Claim", true),
+            ProjectStatus.Cancelled => ("Reposted", null, false),
             _ => (status, null, false)
         };
 
