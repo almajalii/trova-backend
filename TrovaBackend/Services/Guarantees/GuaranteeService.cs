@@ -27,15 +27,18 @@ public class GuaranteeService : IGuaranteeService
     private readonly AppDbContext _db;
     private readonly GuaranteeStorageOptions _storageOptions;
     private readonly string _contentRootPath;
+    private readonly TrovaBackend.Services.Notifications.INotificationService _notificationService;
 
     public GuaranteeService(
         AppDbContext db,
         IOptions<GuaranteeStorageOptions> storageOptions,
-        IHostEnvironment hostEnvironment)
+        IHostEnvironment hostEnvironment,
+        TrovaBackend.Services.Notifications.INotificationService notificationService)
     {
         _db = db;
         _storageOptions = storageOptions.Value;
         _contentRootPath = hostEnvironment.ContentRootPath;
+        _notificationService = notificationService;
     }
 
     // ── Prefill ──────────────────────────────────────────────────────────
@@ -548,6 +551,19 @@ public class GuaranteeService : IGuaranteeService
         application.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+
+        try
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == application.ProjectId);
+            await _notificationService.CreateAsync(
+                application.ContractorId,
+                Models.NotificationType.GuaranteeIssued,
+                $"Your guarantee for {project?.Title ?? "your project"} has been issued.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[NOTIFICATION FAILED] GUARANTEE_ISSUED for {application.ContractorId} — {ex.Message}");
+        }
 
         return await BuildBankGuaranteeDtoAsync(application);
     }

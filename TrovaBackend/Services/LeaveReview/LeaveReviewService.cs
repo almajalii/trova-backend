@@ -3,16 +3,19 @@ using TrovaBackend.Data;
 using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.LeaveReview;
 using TrovaBackend.Models;
+using TrovaBackend.Services.Notifications;
 
 namespace TrovaBackend.Services.LeaveReview;
 
 public class LeaveReviewService : ILeaveReviewService
 {
     private readonly AppDbContext _db;
+    private readonly INotificationService _notificationService;
 
-    public LeaveReviewService(AppDbContext db)
+    public LeaveReviewService(AppDbContext db, INotificationService notificationService)
     {
         _db = db;
+        _notificationService = notificationService;
     }
 
     public async Task<ReviewContextDto?> GetContextAsync(Guid ownerId, string projectId)
@@ -79,6 +82,18 @@ public class LeaveReviewService : ILeaveReviewService
 
         _db.Reviews.Add(review);
         await _db.SaveChangesAsync();
+
+        try
+        {
+            await _notificationService.CreateAsync(
+                awardedBid.ContractorId,
+                NotificationType.ReviewReceived,
+                $"You received a new review on {project.Title}.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[NOTIFICATION FAILED] REVIEW_RECEIVED for {awardedBid.ContractorId} — {ex.Message}");
+        }
     }
 
     // Mirrors LeaveReviewDraft.isComplete on the frontend: every one of

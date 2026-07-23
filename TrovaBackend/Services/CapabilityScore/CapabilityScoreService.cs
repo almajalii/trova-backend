@@ -21,11 +21,13 @@ public class CapabilityScoreService : ICapabilityScoreService
 {
     private readonly AppDbContext _db;
     private readonly ScoringOptions _options;
+    private readonly TrovaBackend.Services.Notifications.INotificationService _notificationService;
 
-    public CapabilityScoreService(AppDbContext db, IOptions<ScoringOptions> options)
+    public CapabilityScoreService(AppDbContext db, IOptions<ScoringOptions> options, TrovaBackend.Services.Notifications.INotificationService notificationService)
     {
         _db = db;
         _options = options.Value;
+        _notificationService = notificationService;
     }
 
     public async Task RecalculateAsync(Guid userId)
@@ -120,6 +122,7 @@ public class CapabilityScoreService : ICapabilityScoreService
 
         var score = await _db.CapabilityScores.FirstOrDefaultAsync(s => s.UserId == userId);
         var isNew = score == null;
+        var previousScore = score?.OverallScore;
         score ??= new Models.CapabilityScore { UserId = userId };
 
         score.OverallScore = overallRounded;
@@ -151,6 +154,21 @@ public class CapabilityScoreService : ICapabilityScoreService
             _db.CapabilityScores.Add(score);
 
         await _db.SaveChangesAsync();
+
+        if (!isNew && previousScore.HasValue && overallRounded > previousScore.Value)
+        {
+            try
+            {
+                await _notificationService.CreateAsync(
+                    userId,
+                    Models.NotificationType.ScoreIncreased,
+                    $"Your Capability Score increased by {overallRounded - previousScore.Value} points");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NOTIFICATION FAILED] SCORE_INCREASED for {userId} — {ex.Message}");
+            }
+        }
     }
 
     public async Task<CapabilityScoreResponse> GetAsync(Guid userId)

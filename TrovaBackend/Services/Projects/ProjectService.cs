@@ -4,6 +4,7 @@ using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.Projects;
 using TrovaBackend.Models;
 using TrovaBackend.Services.CapabilityScore;
+using TrovaBackend.Services.Notifications;
 
 namespace TrovaBackend.Services.Projects;
 
@@ -11,11 +12,13 @@ public class ProjectService : IProjectService
 {
     private readonly AppDbContext _db;
     private readonly ICapabilityScoreService _capabilityScoreService;
+    private readonly INotificationService _notificationService;
 
-    public ProjectService(AppDbContext db, ICapabilityScoreService capabilityScoreService)
+    public ProjectService(AppDbContext db, ICapabilityScoreService capabilityScoreService, INotificationService notificationService)
     {
         _db = db;
         _capabilityScoreService = capabilityScoreService;
+        _notificationService = notificationService;
     }
 
     public async Task<PostProjectResponse> PostProjectAsync(Guid ownerId, PostProjectRequest request)
@@ -891,6 +894,20 @@ public class ProjectService : IProjectService
 
         _db.Bids.Add(bid);
         await _db.SaveChangesAsync();
+
+        // Best-effort — a notification failure shouldn't roll back or fail
+        // a bid that already saved successfully.
+        try
+        {
+            await _notificationService.CreateAsync(
+                contractorId,
+                NotificationType.BidUnderReview,
+                $"Your bid on {project.Title} is under review.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[NOTIFICATION FAILED] BID_UNDER_REVIEW for {contractorId} — {ex.Message}");
+        }
 
         return new SubmitBidResponse
         {

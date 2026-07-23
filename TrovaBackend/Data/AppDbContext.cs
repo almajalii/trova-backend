@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Models.GuaranteeApplication> GuaranteeApplications => Set<Models.GuaranteeApplication>();
     public DbSet<Models.GuaranteeDocument> GuaranteeDocuments => Set<Models.GuaranteeDocument>();
     public DbSet<Models.Review> Reviews => Set<Models.Review>();
+    public DbSet<Models.Notification> Notifications => Set<Models.Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -88,6 +89,12 @@ public class AppDbContext : DbContext
             // One review per project — see the comment on Review.ProjectId.
             entity.HasIndex(r => r.ProjectId).IsUnique();
             entity.HasIndex(r => r.RevieweeId);
+        });
+
+        modelBuilder.Entity<Models.Notification>(entity =>
+        {
+            // The feed query filters by user then sorts by recency.
+            entity.HasIndex(n => new { n.UserId, n.CreatedAt });
         });
 
         // Add further entity configuration here as the domain grows.
