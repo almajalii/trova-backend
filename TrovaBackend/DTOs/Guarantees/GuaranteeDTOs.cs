@@ -1,3 +1,5 @@
+using TrovaBackend.DTOs.Common;
+
 namespace TrovaBackend.DTOs.Guarantees;
 
 // ── Prefill — GET /api/guarantees/prefill?projectId={projectId} ────────────
@@ -106,12 +108,119 @@ public class OwnerGuaranteeDto
     public string ProjectId { get; set; } = string.Empty; // TRV-PRJ-XXXXX
     public string ProjectTitle { get; set; } = string.Empty;
     public string ContractorName { get; set; } = string.Empty; // "Principal" on the document
+
+    // Always set here — this endpoint always has a specific contractor.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string Beneficiary { get; set; } = string.Empty; // owner's own company name + " (You)"
     public string IssuingBank { get; set; } = string.Empty;
     public decimal AmountJod { get; set; }
     public string Type { get; set; } = string.Empty; // e.g. "Performance Guarantee"
-    public string Status { get; set; } = string.Empty; // PENDING_REVIEW | ACTIVE | REJECTED | CLAIMED
-    public string? IssueDate { get; set; } // "yyyy-MM-dd", set once ACTIVE
+
+    // PENDING_REVIEW (bank hasn't decided yet) | ISSUED (bank approved,
+    // awaiting your confirmation) | ACTIVE (you confirmed) | REJECTED | CLAIMED
+    public string Status { get; set; } = string.Empty;
+    public string? IssueDate { get; set; } // "yyyy-MM-dd", set once the bank issues it
     public string? ValidUntil { get; set; } // "yyyy-MM-dd"
     public string? ClaimDate { get; set; } // not modelled yet — always null until CLAIMED exists
+
+    // Set only when Status == REJECTED. May be null for an owner-side
+    // rejection (that flow doesn't collect a reason today); always
+    // populated when the bank was the one who rejected it.
+    public string? RejectionReason { get; set; }
+}
+
+// ── Owner decision request bodies ───────────────────────────────────────
+// POST /api/projects/{projectId}/guarantee/confirm — no body needed.
+// POST /api/projects/{projectId}/guarantee/reject   — body optional.
+
+// ── Bank-facing ──────────────────────────────────────────────────────────
+// GET  /api/bank/requests              -> pending_bank_review queue
+// GET  /api/bank/guarantees            -> issued/approved guarantees
+// POST /api/guarantees/{code}/approve  -> bank issues, Status -> ISSUED
+// POST /api/guarantees/{code}/reject   -> bank rejects, Status -> REJECTED
+//
+// Shape matches the bank portal's existing mock data (constants/mockData.js)
+// exactly, so the frontend needs no reshaping once wired to the real API.
+
+public class RejectGuaranteeRequest
+{
+    // Required for the bank's reject endpoint (enforced in
+    // GuaranteeService.RejectByBankAsync); optional for the owner's.
+    public string? Reason { get; set; }
+}
+
+public class BankApplicantDto
+{
+    public string ContractorId { get; set; } = string.Empty;
+    public string LegalName { get; set; } = string.Empty;
+    public string Cr { get; set; } = string.Empty;
+    public string Tax { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public string Contact { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+}
+
+public class BankProjectDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty; // formatted, e.g. "JOD 238,000"
+    public string Description { get; set; } = string.Empty;
+    public string Duration { get; set; } = string.Empty;
+}
+
+public class BankGuaranteeDetailsDto
+{
+    public string Type { get; set; } = string.Empty; // e.g. "Performance Guarantee"
+    public string Amount { get; set; } = string.Empty; // formatted, e.g. "JOD 23,800"
+    public string Validity { get; set; } = string.Empty; // "Aug 1, 2026 – Oct 31, 2027"
+    public string ExpiryDate { get; set; } = string.Empty; // "yyyy-MM-dd", drives the expired pill
+    public string Conditions { get; set; } = string.Empty; // "—" when none
+}
+
+public class BankBeneficiaryDto
+{
+    public string Company { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public string Contact { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+}
+
+public class BankDocumentDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty; // "Uploaded" | "None"
+}
+
+public class BankDeclarationsDto
+{
+    public bool Accuracy { get; set; }
+    public bool Indemnify { get; set; }
+    public bool Terms { get; set; }
+    public string Signature { get; set; } = string.Empty;
+}
+
+public class BankGuaranteeDto
+{
+    public string Id { get; set; } = string.Empty; // TRV-GT-XXXXX
+    public string Contractor { get; set; } = string.Empty;
+
+    // Populated for the pending-requests queue.
+    public string? RequestedDate { get; set; }
+
+    // Populated once the bank has issued it (requests + active guarantees).
+    public string? IssuedDate { get; set; }
+
+    public string Status { get; set; } = string.Empty; // PENDING_REVIEW | ISSUED | CONFIRMED | REJECTED
+    public string? RejectionReason { get; set; }
+
+    public BankApplicantDto Applicant { get; set; } = new();
+    public BankProjectDto Project { get; set; } = new();
+    public BankGuaranteeDetailsDto Guarantee { get; set; } = new();
+    public BankBeneficiaryDto Beneficiary { get; set; } = new();
+    public List<BankDocumentDto> Documents { get; set; } = new();
+    public BankDeclarationsDto Declarations { get; set; } = new();
 }

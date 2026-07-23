@@ -1,6 +1,8 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TrovaBackend.Data;
+using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.Guarantees;
 using TrovaBackend.Models;
 
@@ -122,7 +124,7 @@ public class GuaranteeService : IGuaranteeService
     // guard correct on its own if that ordering ever changes.
     private async Task EnsureNoActiveApplicationAsync(Guid bidId)
     {
-        var blockingStatuses = new[] { GuaranteeStatus.PendingBankReview, GuaranteeStatus.Approved };
+        var blockingStatuses = new[] { GuaranteeStatus.PendingBankReview, GuaranteeStatus.Issued, GuaranteeStatus.Approved };
         var hasActive = await _db.GuaranteeApplications
             .AnyAsync(g => g.BidId == bidId && blockingStatuses.Contains(g.Status));
 
@@ -350,16 +352,19 @@ public class GuaranteeService : IGuaranteeService
         return await BuildOwnerGuaranteeDtoAsync(application, project);
     }
 
-    // ── Decision ─────────────────────────────────────────────────────────
-    // No real bank sits behind these yet — same stopgap situation as
-    // MockJofsDataProvider on the BankConnection side. The decision is,
-    // in practice, the project owner's: they're the one reviewing what
-    // the contractor's bank issued and choosing to approve or reject it.
-    // Scoped to ownerId so only that project's beneficiary can decide.
+    // ── Owner decision ───────────────────────────────────────────────────
+    // The owner's confirm/reject only applies once the bank has already
+    // issued the guarantee (Status == Issued) — this is the second half of
+    // the two-stage flow, after GuaranteesController/BankController's
+    // bank-side Issue/Reject. Scoped to ownerId so only that project's
+    // beneficiary can decide. Keyed by projectId, matching the access
+    // pattern GetOwnerGuaranteeAsync already uses — the owner's screen
+    // only ever knows which project it's looking at, not the application's
+    // code.
 
-    public async Task<OwnerGuaranteeDto> ApproveAsync(Guid ownerId, string applicationCode)
+    public async Task<OwnerGuaranteeDto> ConfirmAsync(Guid ownerId, string projectId)
     {
-        var (application, project) = await GetPendingApplicationOrThrowAsync(ownerId, applicationCode);
+        var (application, project) = await GetOwnerApplicationInStatusOrThrowAsync(ownerId, projectId, GuaranteeStatus.Issued);
 
         application.Status = GuaranteeStatus.Approved;
         application.UpdatedAt = DateTime.UtcNow;
@@ -386,16 +391,14 @@ public class GuaranteeService : IGuaranteeService
         return await BuildOwnerGuaranteeDtoAsync(application, project);
     }
 
-    public async Task<OwnerGuaranteeDto> RejectAsync(Guid ownerId, string applicationCode)
+    public async Task<OwnerGuaranteeDto> RejectByOwnerAsync(Guid ownerId, string projectId, string? reason)
     {
-        var (application, project) = await GetPendingApplicationOrThrowAsync(ownerId, applicationCode);
+        var (application, project) = await GetOwnerApplicationInStatusOrThrowAsync(ownerId, projectId, GuaranteeStatus.Issued);
 
         application.Status = GuaranteeStatus.Rejected;
+        application.RejectedBy = GuaranteeRejectedBy.Owner;
+        application.RejectionReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
         application.UpdatedAt = DateTime.UtcNow;
-
-        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == application.BidId);
-        if (bid == null)
-            throw new KeyNotFoundException("Bid not found for this guarantee application.");
 
         // Bid.Status stays Confirmed on purpose — "Guarantee Rejected" is
         // a display state layered on top via BidStatusMapper, not a
@@ -412,26 +415,29 @@ public class GuaranteeService : IGuaranteeService
         return await BuildOwnerGuaranteeDtoAsync(application, project);
     }
 
-    // Loads the application and enforces that the caller is the project's
-    // beneficiary (owner). A non-owner (or a nonexistent application) gets
-    // the same 404 either way — never leaks whether an application exists
-    // to someone who isn't the beneficiary, same pattern as
-    // ResolveConfirmedBidAsync on the contractor side.
-    private async Task<(GuaranteeApplication application, Project project)> GetPendingApplicationOrThrowAsync(
-        Guid ownerId, string applicationCode)
+    // Loads the latest application on a project and enforces both that the
+    // caller is the project's beneficiary (owner) and that the application
+    // is actually in the state this decision expects. A non-owner (or a
+    // nonexistent project) gets the same 404 either way — never leaks
+    // whether a project exists to someone who isn't its beneficiary, same
+    // pattern as ResolveConfirmedBidAsync on the contractor side.
+    private async Task<(GuaranteeApplication application, Project project)> GetOwnerApplicationInStatusOrThrowAsync(
+        Guid ownerId, string projectId, string requiredStatus)
     {
-        var application = await _db.GuaranteeApplications
-            .FirstOrDefaultAsync(g => g.ApplicationCode == applicationCode);
-
-        if (application == null || application.BeneficiaryId != ownerId)
-            throw new KeyNotFoundException("Guarantee application not found.");
-
-        if (application.Status != GuaranteeStatus.PendingBankReview)
-            throw new InvalidOperationException("This application has already been decided.");
-
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == application.ProjectId);
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.OwnerId == ownerId && p.ProjectCode == projectId);
         if (project == null)
-            throw new KeyNotFoundException("Project not found for this guarantee application.");
+            throw new KeyNotFoundException("Project not found.");
+
+        var application = await _db.GuaranteeApplications
+            .Where(g => g.ProjectId == project.Id)
+            .OrderByDescending(g => g.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (application == null)
+            throw new KeyNotFoundException("No guarantee application found for this project.");
+
+        if (application.Status != requiredStatus)
+            throw new InvalidOperationException("This guarantee application isn't awaiting your decision.");
 
         return (application, project);
     }
@@ -452,6 +458,7 @@ public class GuaranteeService : IGuaranteeService
     private static string ExternalGuaranteeStatus(string status) => status switch
     {
         GuaranteeStatus.PendingBankReview => "PENDING_REVIEW",
+        GuaranteeStatus.Issued => "ISSUED", // bank issued it; awaiting your confirmation
         GuaranteeStatus.Approved => "ACTIVE",
         GuaranteeStatus.Rejected => "REJECTED",
         _ => status.ToUpperInvariant(),
@@ -482,16 +489,227 @@ public class GuaranteeService : IGuaranteeService
             ProjectId = project.ProjectCode,
             ProjectTitle = project.Title,
             ContractorName = contractorName,
+            AwardedBidder = new AwardedBidderDto
+            {
+                BidId = application.BidId.ToString(),
+                CompanyName = contractorName,
+                Classification = contractorCompany?.ClassificationCode ?? string.Empty,
+                Eligible = true
+            },
             Beneficiary = $"{beneficiaryName} (You)",
             IssuingBank = bankConnection?.BankName ?? "Bank not yet connected",
             AmountJod = application.GuaranteedAmount,
             Type = GuaranteeTypeDisplayLabel.GetValueOrDefault(application.GuaranteeType, application.GuaranteeType),
             Status = ExternalGuaranteeStatus(application.Status),
-            IssueDate = application.Status == GuaranteeStatus.Approved
-                ? application.UpdatedAt.ToString("yyyy-MM-dd")
-                : null,
+            IssueDate = application.IssuedAt?.ToString("yyyy-MM-dd"),
             ValidUntil = application.ValidityExpiry.ToString("yyyy-MM-dd"),
             ClaimDate = null, // claim lifecycle isn't modelled yet
+            RejectionReason = application.RejectionReason,
+        };
+    }
+
+    // ── Bank-facing ──────────────────────────────────────────────────────
+    // One bank account sees every application — no per-bank scoping (see
+    // the comment on IGuaranteeService).
+
+    public async Task<List<BankGuaranteeDto>> GetBankRequestsAsync()
+    {
+        var applications = await _db.GuaranteeApplications
+            .Where(g => g.Status == GuaranteeStatus.PendingBankReview)
+            .OrderBy(g => g.CreatedAt)
+            .ToListAsync();
+
+        var result = new List<BankGuaranteeDto>();
+        foreach (var application in applications)
+            result.Add(await BuildBankGuaranteeDtoAsync(application));
+        return result;
+    }
+
+    public async Task<List<BankGuaranteeDto>> GetBankGuaranteesAsync()
+    {
+        var activeStatuses = new[] { GuaranteeStatus.Issued, GuaranteeStatus.Approved };
+        var applications = await _db.GuaranteeApplications
+            .Where(g => activeStatuses.Contains(g.Status))
+            .OrderByDescending(g => g.IssuedAt)
+            .ToListAsync();
+
+        var result = new List<BankGuaranteeDto>();
+        foreach (var application in applications)
+            result.Add(await BuildBankGuaranteeDtoAsync(application));
+        return result;
+    }
+
+    public async Task<BankGuaranteeDto> IssueAsync(string applicationCode)
+    {
+        var application = await GetPendingBankApplicationOrThrowAsync(applicationCode);
+
+        application.Status = GuaranteeStatus.Issued;
+        application.IssuedAt = DateTime.UtcNow;
+        application.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        return await BuildBankGuaranteeDtoAsync(application);
+    }
+
+    public async Task<BankGuaranteeDto> RejectByBankAsync(string applicationCode, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("A rejection reason is required.");
+
+        var application = await GetPendingBankApplicationOrThrowAsync(applicationCode);
+
+        application.Status = GuaranteeStatus.Rejected;
+        application.RejectedBy = GuaranteeRejectedBy.Bank;
+        application.RejectionReason = reason.Trim();
+        application.UpdatedAt = DateTime.UtcNow;
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == application.ProjectId);
+        if (project == null)
+            throw new KeyNotFoundException("Project not found for this guarantee application.");
+
+        // Same terminal project state whichever side rejects — see the
+        // comment on ProjectStatus.GuaranteeRejectedByYou; it describes
+        // the project's guarantee having died, not who killed it.
+        project.Status = ProjectStatus.GuaranteeRejectedByYou;
+        project.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        return await BuildBankGuaranteeDtoAsync(application);
+    }
+
+    private async Task<GuaranteeApplication> GetPendingBankApplicationOrThrowAsync(string applicationCode)
+    {
+        var application = await _db.GuaranteeApplications
+            .FirstOrDefaultAsync(g => g.ApplicationCode == applicationCode);
+
+        if (application == null)
+            throw new KeyNotFoundException("Guarantee application not found.");
+
+        if (application.Status != GuaranteeStatus.PendingBankReview)
+            throw new InvalidOperationException("This application has already been decided.");
+
+        return application;
+    }
+
+    private static string ExternalBankGuaranteeStatus(string status) => status switch
+    {
+        GuaranteeStatus.PendingBankReview => "PENDING_REVIEW",
+        GuaranteeStatus.Issued => "ISSUED",
+        GuaranteeStatus.Approved => "CONFIRMED", // owner has confirmed it, on top of the bank's issue
+        GuaranteeStatus.Rejected => "REJECTED",
+        _ => status.ToUpperInvariant(),
+    };
+
+    private static readonly Dictionary<string, string> BankDocumentDisplayName = new()
+    {
+        [GuaranteeDocumentType.SignedContract] = "Signed Contract / Agreement",
+        [GuaranteeDocumentType.LetterOfAward] = "Letter of Award",
+        [GuaranteeDocumentType.Other] = "Other Supporting Documents",
+    };
+
+    private static string FormatMoney(decimal amount, string currency) =>
+        $"{currency} {amount.ToString("N0", CultureInfo.InvariantCulture)}";
+
+    private static string FormatDate(DateTime date) =>
+        date.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+
+    private static string FormatValidity(DateTime start, DateTime expiry) =>
+        $"{FormatDate(start)} \u2013 {FormatDate(expiry)}";
+
+    private async Task<BankGuaranteeDto> BuildBankGuaranteeDtoAsync(GuaranteeApplication application)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == application.ProjectId);
+        if (project == null)
+            throw new KeyNotFoundException("Project not found for this guarantee application.");
+
+        var contractorCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == application.ContractorId);
+        var contractorUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == application.ContractorId);
+        var contractorCode = contractorCompany != null
+            ? await GetOrCreatePublicCodeAsync(contractorCompany)
+            : DeterministicFallbackCode(application.ContractorId);
+        var contractorName = contractorCompany != null
+            ? (string.IsNullOrWhiteSpace(contractorCompany.TradingName) ? contractorCompany.LegalCompanyName : contractorCompany.TradingName)
+            : (contractorUser?.Name ?? "Unknown");
+
+        var beneficiaryCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == application.BeneficiaryId);
+        var beneficiaryUser = beneficiaryCompany == null
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == application.BeneficiaryId)
+            : null;
+        var beneficiaryName = beneficiaryCompany != null
+            ? (string.IsNullOrWhiteSpace(beneficiaryCompany.TradingName) ? beneficiaryCompany.LegalCompanyName : beneficiaryCompany.TradingName)
+            : (beneficiaryUser?.Name ?? "Unknown");
+
+        var documents = await _db.GuaranteeDocuments
+            .Where(d => d.GuaranteeApplicationId == application.Id)
+            .ToListAsync();
+
+        var documentDtos = new List<BankDocumentDto>();
+        foreach (var docType in new[] { GuaranteeDocumentType.SignedContract, GuaranteeDocumentType.LetterOfAward, GuaranteeDocumentType.Other })
+        {
+            documentDtos.Add(new BankDocumentDto
+            {
+                Name = BankDocumentDisplayName[docType],
+                Status = documents.Any(d => d.DocumentType == docType) ? "Uploaded" : "None",
+            });
+        }
+
+        return new BankGuaranteeDto
+        {
+            Id = application.ApplicationCode,
+            Contractor = contractorName,
+            RequestedDate = FormatDate(application.CreatedAt),
+            IssuedDate = application.IssuedAt.HasValue ? FormatDate(application.IssuedAt.Value) : null,
+            Status = ExternalBankGuaranteeStatus(application.Status),
+            RejectionReason = application.RejectionReason,
+            Applicant = new BankApplicantDto
+            {
+                ContractorId = $"TRV-CON-{contractorCode}",
+                LegalName = contractorCompany?.LegalCompanyName ?? contractorName,
+                Cr = contractorCompany?.RegistrationNumber ?? string.Empty,
+                Tax = contractorCompany?.TaxVatNumber ?? string.Empty,
+                Address = contractorCompany?.RegisteredAddress ?? string.Empty,
+                Contact = contractorCompany != null
+                    ? FormatContact(contractorCompany.PrimaryContactName, contractorCompany.PositionTitle)
+                    : string.Empty,
+                Email = contractorCompany?.PrimaryEmail ?? contractorUser?.Email ?? string.Empty,
+                Phone = contractorCompany?.PrimaryPhoneNumber ?? contractorUser?.Phone ?? string.Empty,
+            },
+            Project = new BankProjectDto
+            {
+                Name = project.Title,
+                Location = project.Location,
+                Value = FormatMoney(project.ContractValueJod, project.Currency),
+                Description = project.Description,
+                Duration = project.TimelineText,
+            },
+            Guarantee = new BankGuaranteeDetailsDto
+            {
+                Type = GuaranteeTypeDisplayLabel.GetValueOrDefault(application.GuaranteeType, application.GuaranteeType),
+                Amount = FormatMoney(application.GuaranteedAmount, application.Currency),
+                Validity = FormatValidity(application.ValidityStart, application.ValidityExpiry),
+                ExpiryDate = application.ValidityExpiry.ToString("yyyy-MM-dd"),
+                Conditions = string.IsNullOrWhiteSpace(application.SpecialConditions) ? "\u2014" : application.SpecialConditions,
+            },
+            Beneficiary = new BankBeneficiaryDto
+            {
+                Company = beneficiaryName,
+                Address = beneficiaryCompany?.RegisteredAddress ?? string.Empty,
+                Contact = beneficiaryCompany != null
+                    ? FormatContact(beneficiaryCompany.PrimaryContactName, beneficiaryCompany.PositionTitle)
+                    : string.Empty,
+                Email = beneficiaryCompany?.PrimaryEmail ?? beneficiaryUser?.Email ?? string.Empty,
+                Phone = beneficiaryCompany?.PrimaryPhoneNumber ?? beneficiaryUser?.Phone ?? string.Empty,
+            },
+            Documents = documentDtos,
+            Declarations = new BankDeclarationsDto
+            {
+                Accuracy = application.ConfirmAccurate,
+                Indemnify = application.AgreeIndemnify,
+                Terms = application.AcceptTerms,
+                Signature = application.SignatureName,
+            },
         };
     }
 }

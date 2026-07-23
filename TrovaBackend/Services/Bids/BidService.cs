@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
 using TrovaBackend.DTOs.Bids;
 using TrovaBackend.Models;
+using TrovaBackend.Services.CapabilityScore;
+using TrovaBackend.Services.Shared;
 
 namespace TrovaBackend.Services.Bids;
 
@@ -18,10 +20,12 @@ public class BidService : IBidService
     };
 
     private readonly AppDbContext _db;
+    private readonly ICapabilityScoreService _capabilityScoreService;
 
-    public BidService(AppDbContext db)
+    public BidService(AppDbContext db, ICapabilityScoreService capabilityScoreService)
     {
         _db = db;
+        _capabilityScoreService = capabilityScoreService;
     }
 
     public async Task<List<MyBidItemDto>> GetMyBidsAsync(Guid contractorId)
@@ -243,6 +247,101 @@ public class BidService : IBidService
         };
     }
 
+    // GET /api/bids/{bidId}/company-profile. Owner-scoped through the
+    // bid's project, not the bid itself — the caller viewing a bidder's
+    // profile is the project owner, never the contractor who placed it.
+    // A bid that exists but belongs to a project this caller doesn't own
+    // 404s the same as a nonexistent bid, same pattern as every other
+    // ownership-scoped lookup in this codebase.
+    //
+    // Every field below is populated unconditionally — see the doc
+    // comment on BidderCompanyProfileDto for why that's load-bearing here.
+    public async Task<BidderCompanyProfileDto?> GetCompanyProfileAsync(Guid ownerId, Guid bidId)
+    {
+        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == bidId);
+        if (bid == null) return null;
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == bid.ProjectId && p.OwnerId == ownerId);
+        if (project == null) return null;
+
+        var company = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == bid.ContractorId);
+        var contractorUser = company == null
+            ? await _db.Users.FirstOrDefaultAsync(u => u.Id == bid.ContractorId)
+            : null;
+        var tradingName = company != null
+            ? (string.IsNullOrWhiteSpace(company.TradingName) ? company.LegalCompanyName : company.TradingName)
+            : (contractorUser?.Name ?? "Unknown Contractor");
+
+        // Real project/review history for this contractor — shared with
+        // GET /capability-score/me and GET /company-profile/reviews via
+        // ContractorTrackRecordHelper so all three endpoints report the
+        // same numbers for the same contractor.
+        var (totalProjects, failedProjects, currentProjects) =
+            await ContractorTrackRecordHelper.GetProjectStatsAsync(_db, bid.ContractorId);
+        var (avgRating, reviewItems) = await ContractorTrackRecordHelper.GetReviewSummaryAsync(_db, bid.ContractorId);
+
+        // Always fresh, same "recalculate then read" pattern as
+        // ProjectService.BuildBidderDtoAsync — never throws even if this
+        // contractor has no bank connected / no score row yet.
+        await _capabilityScoreService.RecalculateAsync(bid.ContractorId);
+        var score = await _capabilityScoreService.GetAsync(bid.ContractorId);
+
+        return new BidderCompanyProfileDto
+        {
+            TradingName = tradingName,
+            RegistrationNumber = company?.RegistrationNumber ?? string.Empty,
+            TaxVatNumber = company?.TaxVatNumber ?? string.Empty,
+            LegalStructure = company?.LegalStructure ?? string.Empty,
+            YearOfEstablishment = company?.YearOfEstablishment ?? 0,
+            RegisteredAddress = company?.RegisteredAddress ?? string.Empty,
+            CountryOfRegistration = company?.CountryOfRegistration ?? string.Empty,
+            PrimaryContactName = company?.PrimaryContactName ?? string.Empty,
+            PositionTitle = company?.PositionTitle ?? string.Empty,
+            PrimaryEmail = company?.PrimaryEmail ?? contractorUser?.Email ?? string.Empty,
+            PrimaryPhoneNumber = company?.PrimaryPhoneNumber ?? contractorUser?.Phone ?? string.Empty,
+            BusinessLicenseNumber = company?.BusinessLicenseNumber ?? string.Empty,
+            ContractorClassificationGrade = company?.ContractorClassificationGrade ?? string.Empty,
+            Sectors = company?.Sectors ?? new List<string>(),
+            YearsOfExperience = company != null && company.YearOfEstablishment > 0
+                ? Math.Max(0, DateTime.UtcNow.Year - company.YearOfEstablishment)
+                : 0,
+
+            TrackRecordStats = new BidderTrackRecordStatsDto
+            {
+                TotalProjects = totalProjects,
+                FailedProjects = failedProjects,
+                CurrentProjects = currentProjects,
+                AvgRating = Math.Round(avgRating, 1)
+            },
+
+            ScoreBreakdown = new BidderScoreBreakdownDto
+            {
+                FinancialSolvency = (int)Math.Round(new[]
+                {
+                    score.Factors.NumberOfCurrentDebts.Percentage,
+                    score.Factors.DebtCapacity.Percentage,
+                    score.Factors.CompanyAssetsValue.Percentage,
+                    score.Factors.DelinquentDebts.Percentage,
+                    score.Factors.PaymentHistory.Percentage,
+                    score.Factors.CashflowTrends.Percentage
+                }.Average()),
+                ProjectTrackRecord = (int)Math.Round(new[]
+                {
+                    score.Factors.CurrentWorkload.Percentage,
+                    score.Factors.ProjectDeliveryHistory.Percentage
+                }.Average()),
+                PastProjectRatings = (int)Math.Round(avgRating / 5.0 * 100)
+            },
+
+            Reviews = new BidderReviewsSummaryDto
+            {
+                AverageRating = Math.Round(avgRating, 1),
+                TotalReviews = reviewItems.Count,
+                Items = reviewItems
+            }
+        };
+    }
+
     // Four-stage timeline covering the happy path (Submitted -> Selected
     // -> Guarantee -> Complete). Doesn't have a dedicated stage for
     // BackedOff/BACKED_OFF — that status isn't in the frontend's handled
@@ -283,6 +382,7 @@ public class BidService : IBidService
                 guaranteeStep.State = guaranteeApplication?.Status switch
                 {
                     GuaranteeStatus.PendingBankReview => "current",
+                    GuaranteeStatus.Issued => "current", // bank issued it; still waiting on the owner's confirm
                     GuaranteeStatus.Rejected => "rejected",
                     _ => "pending" // no application submitted yet
                 };
@@ -398,6 +498,7 @@ public class BidService : IBidService
         (BidStatus.Submitted, _) => "Waiting for owner's decision",
         (BidStatus.PendingConfirmation, _) => "Awarded to you — confirm to proceed",
         (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview) => "Guarantee application submitted — waiting on bank review",
+        (BidStatus.Confirmed, GuaranteeStatus.Issued) => "Guarantee issued by the bank — waiting on the owner to confirm",
         (BidStatus.Confirmed, GuaranteeStatus.Rejected) => "Your guarantee application was rejected. Apply for a new one or back off.",
         (BidStatus.Confirmed, _) => "Confirmed — apply for your guarantee to proceed",
         (BidStatus.InProgress, _) => "Work in progress",
@@ -461,26 +562,32 @@ public static class BidStatusMapper
     // the owner to confirm/flag" (WORK_SUBMITTED), which the bid-side
     // DTOs previously had no way to signal at all.
     //
-    // Confirmed splits into three external states so the frontend doesn't
+    // Confirmed splits into four external states so the frontend doesn't
     // have to infer any of this from Note text:
     //   - CONFIRMED: bid confirmed, contractor hasn't applied for the
     //     guarantee yet — "Apply for Guarantee" button state.
     //   - GUARANTEE_PENDING_REVIEW: application submitted, bank hasn't
     //     decided yet.
-    //   - GUARANTEE_REJECTED: bank rejected the application — "Back Off"
-    //     / "Apply for New Guarantee" button state. Bid.Status itself
-    //     stays Confirmed here (see GuaranteeService.RejectAsync); this
-    //     is a read-side-only distinction driven by the linked
-    //     GuaranteeApplication's Status.
-    // On approval the bid moves to a real BidStatus (InProgress) instead
-    // of staying Confirmed, so there's no "GUARANTEE_APPROVED" case here —
-    // (BidStatus.InProgress, _) below already covers it.
+    //   - GUARANTEE_ISSUED: bank issued the guarantee; waiting on the
+    //     project owner to confirm it (the second half of the two-stage
+    //     bank -> owner decision — see GuaranteeService.ConfirmAsync).
+    //   - GUARANTEE_REJECTED: rejected — either by the bank or by the
+    //     owner (see GuaranteeRejectedBy) — "Back Off" / "Apply for New
+    //     Guarantee" button state either way. Bid.Status itself stays
+    //     Confirmed here (see GuaranteeService.RejectByBankAsync /
+    //     RejectByOwnerAsync); this is a read-side-only distinction
+    //     driven by the linked GuaranteeApplication's Status.
+    // On the owner's confirm, the bid moves to a real BidStatus
+    // (InProgress) instead of staying Confirmed, so there's no
+    // "GUARANTEE_APPROVED" case here — (BidStatus.InProgress, _) below
+    // already covers it.
     public static string ToExternal(string internalStatus, string? guaranteeStatus = null, DateTime? workSubmittedAt = null) =>
         (internalStatus, guaranteeStatus, workSubmittedAt.HasValue) switch
         {
             (BidStatus.Submitted, _, _) => "PENDING",
             (BidStatus.PendingConfirmation, _, _) => "SELECTED",
             (BidStatus.Confirmed, GuaranteeStatus.PendingBankReview, _) => "GUARANTEE_PENDING_REVIEW",
+            (BidStatus.Confirmed, GuaranteeStatus.Issued, _) => "GUARANTEE_ISSUED",
             (BidStatus.Confirmed, GuaranteeStatus.Rejected, _) => "GUARANTEE_REJECTED",
             (BidStatus.Confirmed, _, _) => "CONFIRMED",
             (BidStatus.InProgress, _, true) => "WORK_SUBMITTED",

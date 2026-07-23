@@ -1,3 +1,5 @@
+using TrovaBackend.DTOs.Common;
+
 namespace TrovaBackend.DTOs.ReviewWork;
 
 // ── Submitted Work — GET /api/projects/{projectId}/submitted-work ──────────
@@ -16,6 +18,10 @@ public class SubmittedWorkDto
     public string GuaranteeTypeRequired { get; set; } = string.Empty;
     public string PaymentTerms { get; set; } = string.Empty;
     public string ContractorName { get; set; } = string.Empty;
+
+    // Always set here — this endpoint always has a specific contractor.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string SubmittedDate { get; set; } = string.Empty; // "yyyy-MM-dd"
     public string? GuaranteeRowText { get; set; }
 }

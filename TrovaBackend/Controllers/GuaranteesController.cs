@@ -83,29 +83,64 @@ public class GuaranteesController : ControllerBase
     // POST /api/guarantees/{applicationCode}/approve
     // POST /api/guarantees/{applicationCode}/reject
     //
-    // Owner-facing. This is the project owner's decision on what the
-    // contractor's bank issued — scoped to ownerId in the service, so a
-    // caller who isn't that project's beneficiary gets a 404, same as any
-    // other project resource that isn't theirs. Matches
-    // guarantee_review_service.dart's approveGuarantee()/rejectGuarantee().
+    // Bank-facing. This is the bank issuing (or rejecting) the guarantee
+    // the contractor applied for — the first of the two decisions in the
+    // flow. Matches the bank portal's requests.js approveRequest()/
+    // denyRequest(). The owner's second decision (confirming or rejecting
+    // what the bank issued) lives below, under /api/projects/{id}/guarantee.
     [HttpPost("{applicationCode}/approve")]
+    [Authorize(Roles = "bank")]
     public async Task<IActionResult> Approve(string applicationCode)
     {
-        var ownerId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var result = await _guaranteeService.ApproveAsync(ownerId, applicationCode);
-        return Ok(new ApiResponse<OwnerGuaranteeDto>
+        var result = await _guaranteeService.IssueAsync(applicationCode);
+        return Ok(new ApiResponse<BankGuaranteeDto>
         {
             Success = true,
-            Message = "Guarantee approved.",
+            Message = "Guarantee issued.",
             Data = result
         });
     }
 
     [HttpPost("{applicationCode}/reject")]
-    public async Task<IActionResult> Reject(string applicationCode)
+    [Authorize(Roles = "bank")]
+    public async Task<IActionResult> Reject(string applicationCode, [FromBody] RejectGuaranteeRequest request)
+    {
+        var result = await _guaranteeService.RejectByBankAsync(applicationCode, request.Reason ?? string.Empty);
+        return Ok(new ApiResponse<BankGuaranteeDto>
+        {
+            Success = true,
+            Message = "Guarantee rejected.",
+            Data = result
+        });
+    }
+
+    // POST /api/projects/{projectId}/guarantee/confirm
+    // POST /api/projects/{projectId}/guarantee/reject
+    //
+    // Owner-facing. This is the project owner's decision on what the
+    // bank issued — scoped to ownerId in the service, so a caller who
+    // isn't that project's beneficiary gets a 404, same as any other
+    // project resource that isn't theirs. Matches
+    // guarantee_review_service.dart's approveGuarantee()/rejectGuarantee()
+    // (renamed confirm/reject here since "approve" is now the bank's verb).
+    [HttpPost("/api/projects/{projectId}/guarantee/confirm")]
+    public async Task<IActionResult> Confirm(string projectId)
     {
         var ownerId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var result = await _guaranteeService.RejectAsync(ownerId, applicationCode);
+        var result = await _guaranteeService.ConfirmAsync(ownerId, projectId);
+        return Ok(new ApiResponse<OwnerGuaranteeDto>
+        {
+            Success = true,
+            Message = "Guarantee confirmed.",
+            Data = result
+        });
+    }
+
+    [HttpPost("/api/projects/{projectId}/guarantee/reject")]
+    public async Task<IActionResult> RejectByOwner(string projectId, [FromBody] RejectGuaranteeRequest? request)
+    {
+        var ownerId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var result = await _guaranteeService.RejectByOwnerAsync(ownerId, projectId, request?.Reason);
         return Ok(new ApiResponse<OwnerGuaranteeDto>
         {
             Success = true,

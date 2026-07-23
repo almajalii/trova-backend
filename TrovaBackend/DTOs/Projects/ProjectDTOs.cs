@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using TrovaBackend.DTOs.Common;
 
 namespace TrovaBackend.DTOs.Projects;
 
@@ -73,9 +74,25 @@ public class ProjectListItemDto
     public decimal ContractValueJod { get; set; }
 
     public string? DetailText { get; set; }
+
+    // Set only when DetailText names a specific contractor (not the
+    // "N bidders" copy) — null/omitted renders DetailText as plain text.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string? GuaranteeStripLabel { get; set; }
     public string? GuaranteeStripSubtext { get; set; }
     public string? GuaranteeStripTone { get; set; } // "SUCCESS" | "WARNING" | null
+
+    // PENDING_REVIEW | ISSUED | ACTIVE | REJECTED | CLAIMED — same enum
+    // GET /api/projects/{projectId}/guarantee's OwnerGuaranteeDto.Status
+    // uses. Null when there's no guarantee application on this project
+    // yet. Added alongside the free-text fields above (not instead of)
+    // so the client can key its own copy off the real status instead of
+    // trusting DetailText/GuaranteeStrip* to stay in sync with it — those
+    // are still populated for anyone not ready to switch over, but this
+    // is the field to build new UI against.
+    public string? GuaranteeStatus { get; set; }
+
     public string? Note { get; set; }
     public string? ActionLabel { get; set; }
 }
@@ -92,6 +109,11 @@ public class ProjectHistoryItemDto
     public decimal ContractValueJod { get; set; }
 
     public string? DetailText { get; set; }
+
+    // Set only when DetailText names a specific contractor (e.g.
+    // "Contractor: X") — not for "Completed May 2026" / "Reposted ..." copy.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string? GuaranteeStripLabel { get; set; }
     public string? GuaranteeStripSubtext { get; set; }
 }
@@ -111,6 +133,10 @@ public class ProjectDetailDto
     public string Status { get; set; } = string.Empty;
     public string StatusLabel { get; set; } = string.Empty;
     public string? Subtitle { get; set; }
+
+    // Set whenever Subtitle names a specific contractor.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string Sector { get; set; } = string.Empty;
     public decimal ContractValueJod { get; set; }
     public string Location { get; set; } = string.Empty;
@@ -119,6 +145,11 @@ public class ProjectDetailDto
     public string GuaranteeTypeRequired { get; set; } = string.Empty;
     public string PaymentTerms { get; set; } = string.Empty;
     public string? GuaranteeRowText { get; set; }
+
+    // PENDING_REVIEW | ISSUED | ACTIVE | REJECTED | CLAIMED — same field,
+    // same reasoning as ProjectListItemDto.GuaranteeStatus above.
+    public string? GuaranteeStatus { get; set; }
+
     public string? BiddersRowText { get; set; }
     public List<TimelineStepDto> Timeline { get; set; } = new();
     public string? ActionLabel { get; set; }

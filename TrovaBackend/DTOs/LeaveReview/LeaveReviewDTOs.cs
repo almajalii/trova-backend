@@ -1,3 +1,5 @@
+using TrovaBackend.DTOs.Common;
+
 namespace TrovaBackend.DTOs.LeaveReview;
 
 // The six rating categories, keyed the same snake_case way
@@ -30,6 +32,10 @@ public class ReviewContextDto
 {
     public string ProjectId { get; set; } = string.Empty;
     public string ContractorName { get; set; } = string.Empty;
+
+    // Always set here — this endpoint always has a specific contractor.
+    public AwardedBidderDto? AwardedBidder { get; set; }
+
     public string ProjectTitle { get; set; } = string.Empty;
     public string CompletedDate { get; set; } = string.Empty; // "yyyy-MM-dd"
     public Dictionary<string, int> Ratings { get; set; } = new();

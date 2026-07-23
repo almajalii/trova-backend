@@ -32,6 +32,7 @@ builder.Services.Configure<TrovaBackend.Services.Guarantees.GuaranteeStorageOpti
 builder.Services.AddScoped<TrovaBackend.Services.ReviewWork.IReviewWorkService, TrovaBackend.Services.ReviewWork.ReviewWorkService>();
 builder.Services.AddScoped<TrovaBackend.Services.RepostProject.IRepostProjectService, TrovaBackend.Services.RepostProject.RepostProjectService>();
 builder.Services.AddScoped<TrovaBackend.Services.LeaveReview.ILeaveReviewService, TrovaBackend.Services.LeaveReview.LeaveReviewService>();
+builder.Services.AddScoped<TrovaBackend.Services.CompanyProfile.ICompanyProfileService, TrovaBackend.Services.CompanyProfile.CompanyProfileService>();
 // Bank connection — MockJofsDataProvider stands in for the real JOFS
 // sandbox client. Swap this one registration to go live later.
 builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();

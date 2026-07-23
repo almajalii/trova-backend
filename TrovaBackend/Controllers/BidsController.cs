@@ -117,6 +117,36 @@ public class BidsController : ControllerBase
         return RespondWithList(result, "Work marked as done.");
     }
 
+    // GET /api/bids/{bidId}/company-profile
+    // Owner-facing — the join target for every awardedBidder tap-through
+    // (Project Detail/My Projects/History, Guarantee, Submitted Work,
+    // Leave Review). Scoped to the project owner who owns the bid's
+    // project; a bid on someone else's project 404s the same as a
+    // nonexistent one.
+    [HttpGet("{bidId}/company-profile")]
+    public async Task<IActionResult> CompanyProfile(Guid bidId)
+    {
+        var ownerId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var result = await _bidService.GetCompanyProfileAsync(ownerId, bidId);
+
+        if (result == null)
+        {
+            return NotFound(new ApiResponse<BidderCompanyProfileDto?>
+            {
+                Success = false,
+                Message = "Bid not found.",
+                Data = null
+            });
+        }
+
+        return Ok(new ApiResponse<BidderCompanyProfileDto>
+        {
+            Success = true,
+            Message = "Company profile retrieved successfully.",
+            Data = result
+        });
+    }
+
     private IActionResult RespondWithList(List<MyBidItemDto>? result, string successMessage)
     {
         if (result == null)

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
+using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.LeaveReview;
 using TrovaBackend.Models;
 
@@ -23,12 +24,13 @@ public class LeaveReviewService : ILeaveReviewService
         var alreadyReviewed = await _db.Reviews.AnyAsync(r => r.ProjectId == project.Id);
         if (alreadyReviewed) return null;
 
-        var contractorName = await ResolveContractorNameAsync(project);
+        var (contractorName, awardedBidder) = await ResolveContractorContextAsync(project);
 
         return new ReviewContextDto
         {
             ProjectId = project.ProjectCode,
             ContractorName = contractorName,
+            AwardedBidder = awardedBidder,
             ProjectTitle = project.Title,
             // No ProjectStatusHistory table exists yet (same gap noted in
             // ProjectService) — UpdatedAt is the closest proxy for "when
@@ -93,18 +95,35 @@ public class LeaveReviewService : ILeaveReviewService
         return ratings;
     }
 
-    private async Task<string> ResolveContractorNameAsync(Project project)
+    private async Task<(string ContractorName, AwardedBidderDto? AwardedBidder)> ResolveContractorContextAsync(Project project)
     {
-        if (!project.AwardedBidId.HasValue) return "Unknown";
+        if (!project.AwardedBidId.HasValue) return ("Unknown", null);
 
         var awardedBid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == project.AwardedBidId.Value);
-        if (awardedBid == null) return "Unknown";
+        if (awardedBid == null) return ("Unknown", null);
 
         var contractorCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == awardedBid.ContractorId);
+        string contractorName;
         if (contractorCompany != null)
-            return string.IsNullOrWhiteSpace(contractorCompany.TradingName) ? contractorCompany.LegalCompanyName : contractorCompany.TradingName;
+        {
+            contractorName = string.IsNullOrWhiteSpace(contractorCompany.TradingName)
+                ? contractorCompany.LegalCompanyName
+                : contractorCompany.TradingName;
+        }
+        else
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == awardedBid.ContractorId);
+            contractorName = user?.Name ?? "Unknown";
+        }
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == awardedBid.ContractorId);
-        return user?.Name ?? "Unknown";
+        var awardedBidder = new AwardedBidderDto
+        {
+            BidId = awardedBid.Id.ToString(),
+            CompanyName = contractorName,
+            Classification = contractorCompany?.ClassificationCode ?? string.Empty,
+            Eligible = true
+        };
+
+        return (contractorName, awardedBidder);
     }
 }

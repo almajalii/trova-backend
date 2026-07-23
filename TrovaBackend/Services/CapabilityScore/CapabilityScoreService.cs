@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using TrovaBackend.Data;
 using TrovaBackend.DTOs.CapabilityScore;
+using TrovaBackend.Services.Shared;
 
 namespace TrovaBackend.Services.CapabilityScore;
 
@@ -73,25 +74,18 @@ public class CapabilityScoreService : ICapabilityScoreService
         }
 
         // ── Internal factors (Trova's own project/payment history) ──────
-        // Payments and reviews still don't exist as features, so those
-        // stay at a clean-slate default. Projects/Bids now exist, so
-        // currentProjects (and the CurrentWorkload factor derived from it)
-        // are wired up for real below.
-        var totalProjects = 0;
-        var failedProjects = 0;
-        var avgRating = 0.0;
+        // Payments still don't exist as a feature, so those stay at a
+        // clean-slate default. Projects/Bids/Reviews now exist for real —
+        // totalProjects/failedProjects/currentProjects/avgRating are
+        // computed here via the same shared helper GET
+        // /bids/{bidId}/company-profile and GET /company-profile/reviews
+        // use, so this endpoint's trackRecordStats stop being the
+        // hardcoded zeros they used to be and agree with those two.
+        var (totalProjects, failedProjects, activeProjects) =
+            await ContractorTrackRecordHelper.GetProjectStatsAsync(_db, userId);
+        var (avgRating, _) = await ContractorTrackRecordHelper.GetReviewSummaryAsync(_db, userId);
         var successfulPayments = 0;
         var totalPayments = 0;
-
-        // Projects awarded to this user (as contractor) that are still
-        // active — i.e. not yet completed, failed, or cancelled.
-        var activeProjects = await (
-            from p in _db.Projects
-            join b in _db.Bids on p.AwardedBidId equals b.Id
-            where b.ContractorId == userId
-               && (p.Status == Models.ProjectStatus.Awarded || p.Status == Models.ProjectStatus.InProgress)
-            select p.Id
-        ).CountAsync();
 
         var paymentHistoryScore = totalPayments > 0
             ? Clamp0To100((int)Math.Round(100.0 * successfulPayments / totalPayments))

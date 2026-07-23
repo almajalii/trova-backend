@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
+using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.ReviewWork;
 using TrovaBackend.Models;
 
@@ -25,12 +26,21 @@ public class ReviewWorkService : IReviewWorkService
             : null;
 
         var contractorName = "Unknown";
+        AwardedBidderDto? awardedBidder = null;
         if (awardedBid != null)
         {
             var contractorCompany = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == awardedBid.ContractorId);
             contractorName = contractorCompany != null
                 ? (string.IsNullOrWhiteSpace(contractorCompany.TradingName) ? contractorCompany.LegalCompanyName : contractorCompany.TradingName)
                 : (await _db.Users.FirstOrDefaultAsync(u => u.Id == awardedBid.ContractorId))?.Name ?? "Unknown";
+
+            awardedBidder = new AwardedBidderDto
+            {
+                BidId = awardedBid.Id.ToString(),
+                CompanyName = contractorName,
+                Classification = contractorCompany?.ClassificationCode ?? string.Empty,
+                Eligible = true
+            };
         }
 
         // Same "Active · TRV-GT-XXXXX" shape Project Detail's
@@ -54,6 +64,7 @@ public class ReviewWorkService : IReviewWorkService
             GuaranteeTypeRequired = project.GuaranteeTypeRequired,
             PaymentTerms = project.PaymentTerms,
             ContractorName = contractorName,
+            AwardedBidder = awardedBidder,
             SubmittedDate = project.SubmittedDate.Value.ToString("yyyy-MM-dd"),
             GuaranteeRowText = guaranteeApp != null ? $"Active · {guaranteeApp.ApplicationCode}" : null,
         };

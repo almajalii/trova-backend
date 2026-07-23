@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
+using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.Projects;
 using TrovaBackend.Models;
 using TrovaBackend.Services.CapabilityScore;
@@ -96,7 +97,7 @@ public class ProjectService : IProjectService
         if (projects.Count == 0) return new List<ProjectListItemDto>();
 
         var bidCounts = await GetBidCountsAsync(projects.Select(p => p.Id));
-        var (awardedBids, contractorNames) = await GetAwardedBidContextAsync(projects);
+        var (awardedBids, contractorNames, classifications) = await GetAwardedBidContextAsync(projects);
         var guaranteeApps = await GetLatestGuaranteeApplicationsAsync(projects.Select(p => p.Id));
 
         return projects.Select(p =>
@@ -104,8 +105,9 @@ public class ProjectService : IProjectService
             bidCounts.TryGetValue(p.Id, out var bidCount);
             var awardedBid = ResolveAwardedBid(p, awardedBids);
             var contractorName = ResolveContractorName(awardedBid, contractorNames);
+            var classification = ResolveClassification(awardedBid, classifications);
             guaranteeApps.TryGetValue(p.Id, out var guaranteeApp);
-            var fields = BuildActiveListFields(p.Status, bidCount, awardedBid, contractorName, guaranteeApp);
+            var fields = BuildActiveListFields(p.Status, bidCount, awardedBid, contractorName, classification, guaranteeApp);
             var strip = BuildGuaranteeStrip(p.Status, guaranteeApp);
 
             return new ProjectListItemDto
@@ -115,9 +117,11 @@ public class ProjectService : IProjectService
                 Status = p.Status.ToUpperInvariant(),
                 ContractValueJod = p.ContractValueJod,
                 DetailText = fields.DetailText,
+                AwardedBidder = fields.AwardedBidder,
                 GuaranteeStripLabel = strip.Label,
                 GuaranteeStripSubtext = strip.Subtext,
                 GuaranteeStripTone = strip.Tone,
+                GuaranteeStatus = ExternalGuaranteeStatus(guaranteeApp?.Status),
                 Note = null,
                 ActionLabel = fields.ActionLabel
             };
@@ -133,7 +137,7 @@ public class ProjectService : IProjectService
 
         if (projects.Count == 0) return new List<ProjectHistoryItemDto>();
 
-        var (awardedBids, contractorNames) = await GetAwardedBidContextAsync(projects);
+        var (awardedBids, contractorNames, classifications) = await GetAwardedBidContextAsync(projects);
 
         return projects.Select(p =>
         {
@@ -153,6 +157,13 @@ public class ProjectService : IProjectService
                 _ => null
             };
 
+            // Only the Disputed/Failed "Contractor: X" copy names a
+            // specific contractor — Completed/Cancelled detail text doesn't.
+            var namesContractor = p.Status is ProjectStatus.Disputed or ProjectStatus.Failed && contractorName != null;
+            var awardedBidder = namesContractor
+                ? BuildAwardedBidder(awardedBid, contractorName, ResolveClassification(awardedBid, classifications))
+                : null;
+
             return new ProjectHistoryItemDto
             {
                 ProjectId = p.ProjectCode,
@@ -160,6 +171,7 @@ public class ProjectService : IProjectService
                 Status = p.Status.ToUpperInvariant(),
                 ContractValueJod = p.ContractValueJod,
                 DetailText = detailText,
+                AwardedBidder = awardedBidder,
                 // Dispute/guarantee-claim detail isn't modelled yet either —
                 // null until that data exists.
                 GuaranteeStripLabel = null,
@@ -177,6 +189,7 @@ public class ProjectService : IProjectService
 
         Bid? awardedBid = null;
         string? contractorName = null;
+        string? classification = null;
 
         if (project.AwardedBidId.HasValue)
         {
@@ -185,6 +198,8 @@ public class ProjectService : IProjectService
             {
                 var names = await GetContractorNamesAsync(new[] { awardedBid.ContractorId });
                 names.TryGetValue(awardedBid.ContractorId, out contractorName);
+                var classifications = await GetContractorClassificationsAsync(new[] { awardedBid.ContractorId });
+                classifications.TryGetValue(awardedBid.ContractorId, out classification);
             }
         }
 
@@ -198,7 +213,10 @@ public class ProjectService : IProjectService
         // GetStatusMeta doesn't know about GuaranteeApplication state —
         // this is the one place that context gets layered on top of the
         // generic per-status action label.
-        if (project.Status == ProjectStatus.Awarded && guaranteeApp?.Status == GuaranteeStatus.PendingBankReview)
+        // Same fix as the three copy-builders above: the owner's action is
+        // only available once the bank has issued it, not while it's
+        // still pending the bank's own decision.
+        if (project.Status == ProjectStatus.Awarded && guaranteeApp?.Status == GuaranteeStatus.Issued)
         {
             actionLabel = "Review Guarantee";
         }
@@ -210,6 +228,7 @@ public class ProjectService : IProjectService
             Status = project.Status.ToUpperInvariant(),
             StatusLabel = statusLabel,
             Subtitle = BuildSubtitle(project.Status, contractorName),
+            AwardedBidder = BuildAwardedBidder(awardedBid, contractorName, classification),
             Sector = project.Sector,
             ContractValueJod = project.ContractValueJod,
             Location = project.Location,
@@ -221,6 +240,7 @@ public class ProjectService : IProjectService
                 ? $"{bidCount} bidder{(bidCount == 1 ? "" : "s")}"
                 : null,
             GuaranteeRowText = BuildGuaranteeRowText(project.Status, awardedBid, guaranteeApp),
+            GuaranteeStatus = ExternalGuaranteeStatus(guaranteeApp?.Status),
             Timeline = BuildTimeline(project, awardedBid),
             ActionLabel = actionLabel,
             ActionIsDanger = actionIsDanger
@@ -241,22 +261,23 @@ public class ProjectService : IProjectService
             .ToDictionaryAsync(x => x.ProjectId, x => x.Count);
     }
 
-    private async Task<(Dictionary<Guid, Bid> awardedBids, Dictionary<Guid, string> contractorNames)>
+    private async Task<(Dictionary<Guid, Bid> awardedBids, Dictionary<Guid, string> contractorNames, Dictionary<Guid, string> classifications)>
         GetAwardedBidContextAsync(List<Project> projects)
     {
         var awardedBidIds = projects.Where(p => p.AwardedBidId.HasValue)
             .Select(p => p.AwardedBidId!.Value).Distinct().ToList();
 
         if (awardedBidIds.Count == 0)
-            return (new Dictionary<Guid, Bid>(), new Dictionary<Guid, string>());
+            return (new Dictionary<Guid, Bid>(), new Dictionary<Guid, string>(), new Dictionary<Guid, string>());
 
         var awardedBids = await _db.Bids
             .Where(b => awardedBidIds.Contains(b.Id))
             .ToDictionaryAsync(b => b.Id, b => b);
 
         var contractorNames = await GetContractorNamesAsync(awardedBids.Values.Select(b => b.ContractorId));
+        var classifications = await GetContractorClassificationsAsync(awardedBids.Values.Select(b => b.ContractorId));
 
-        return (awardedBids, contractorNames);
+        return (awardedBids, contractorNames, classifications);
     }
 
     private static Bid? ResolveAwardedBid(Project p, Dictionary<Guid, Bid> awardedBids) =>
@@ -264,6 +285,26 @@ public class ProjectService : IProjectService
 
     private static string? ResolveContractorName(Bid? awardedBid, Dictionary<Guid, string> contractorNames) =>
         awardedBid != null && contractorNames.TryGetValue(awardedBid.ContractorId, out var name) ? name : null;
+
+    private static string? ResolveClassification(Bid? awardedBid, Dictionary<Guid, string> classifications) =>
+        awardedBid != null && classifications.TryGetValue(awardedBid.ContractorId, out var code) ? code : null;
+
+    // Join key for the frontend's tap-through to
+    // GET /bids/{bidId}/company-profile — see awardedBidder spec. Null
+    // when there's no awarded bid or no resolved company name, so the
+    // caller can render plain, non-tappable text instead.
+    private static AwardedBidderDto? BuildAwardedBidder(Bid? awardedBid, string? contractorName, string? classification)
+    {
+        if (awardedBid == null || contractorName == null) return null;
+
+        return new AwardedBidderDto
+        {
+            BidId = awardedBid.Id.ToString(),
+            CompanyName = contractorName,
+            Classification = classification ?? string.Empty,
+            Eligible = true
+        };
+    }
 
     // Contractor's display name — trading name if set, else legal company
     // name, falling back to the user's own name if they haven't submitted
@@ -293,6 +334,19 @@ public class ProjectService : IProjectService
         return names;
     }
 
+    // Classification code ("A"/"B"/"C") per contractor, keyed the same
+    // way as GetContractorNamesAsync — "" (not present in the dictionary)
+    // for a contractor who hasn't submitted Company Details yet.
+    private async Task<Dictionary<Guid, string>> GetContractorClassificationsAsync(IEnumerable<Guid> contractorIds)
+    {
+        var ids = contractorIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, string>();
+
+        return await _db.CompanyDetails
+            .Where(c => ids.Contains(c.UserId))
+            .ToDictionaryAsync(c => c.UserId, c => c.ClassificationCode);
+    }
+
     // Latest (most recent) GuaranteeApplication per project — a rejected
     // application can be followed by a fresh resubmission after the
     // contractor applies again, and only the newest one is "live" for
@@ -311,36 +365,51 @@ public class ProjectService : IProjectService
         return apps.GroupBy(g => g.ProjectId).ToDictionary(g => g.Key, g => g.First());
     }
 
-    private static (string? DetailText, string? ActionLabel) BuildActiveListFields(
-        string status, int bidCount, Bid? awardedBid, string? contractorName, GuaranteeApplication? guaranteeApp)
+    private static (string? DetailText, string? ActionLabel, AwardedBidderDto? AwardedBidder) BuildActiveListFields(
+        string status, int bidCount, Bid? awardedBid, string? contractorName, string? classification, GuaranteeApplication? guaranteeApp)
     {
+        // Only built (and only ever attached below) when contractorName is
+        // non-null — the "contractor"/"Contractor" fallback text used for
+        // a null name never names anyone specific, so it never gets a
+        // tap-through target either.
+        var bidder = BuildAwardedBidder(awardedBid, contractorName, classification);
+
         return status switch
         {
             ProjectStatus.OpenForBids =>
-                ($"{bidCount} bidder{(bidCount == 1 ? "" : "s")}", null),
+                ($"{bidCount} bidder{(bidCount == 1 ? "" : "s")}", null, null),
+
+            // "Ready for review" is only true once the BANK has issued
+            // it — that's when it's actually the owner's turn to look at
+            // it. Previously this checked PendingBankReview, a holdover
+            // from when the owner stood in for the bank; now that the
+            // bank decides first, PendingBankReview means "still waiting
+            // on the bank," not "ready for you."
+            ProjectStatus.Awarded when guaranteeApp?.Status == GuaranteeStatus.Issued =>
+                ($"Awarded to {contractorName ?? "contractor"} — guarantee ready for review", "Review Guarantee", bidder),
 
             ProjectStatus.Awarded when guaranteeApp?.Status == GuaranteeStatus.PendingBankReview =>
-                ($"Awarded to {contractorName ?? "contractor"} — guarantee ready for review", "Review Guarantee"),
+                ($"Awarded to {contractorName ?? "contractor"} — guarantee pending bank review", null, bidder),
 
             ProjectStatus.Awarded when awardedBid?.Status == BidStatus.Confirmed =>
-                ($"Awarded to {contractorName ?? "contractor"} — waiting for guarantee", null),
+                ($"Awarded to {contractorName ?? "contractor"} — waiting for guarantee", null, bidder),
 
             ProjectStatus.Awarded =>
-                ($"Awarded to {contractorName ?? "contractor"} — awaiting confirmation", null),
+                ($"Awarded to {contractorName ?? "contractor"} — awaiting confirmation", null, bidder),
 
             ProjectStatus.ContractorBackedOff =>
-                ($"{contractorName ?? "Contractor"} backed off", "Post Project Again"),
+                ($"{contractorName ?? "Contractor"} backed off", "Post Project Again", bidder),
 
             ProjectStatus.GuaranteeRejectedByYou =>
-                ("Guarantee rejected", "Post Project Again"),
+                ("Guarantee rejected", "Post Project Again", null),
 
             ProjectStatus.InProgress =>
-                (contractorName != null ? $"Awarded to {contractorName}" : null, null),
+                (contractorName != null ? $"Awarded to {contractorName}" : null, null, bidder),
 
             ProjectStatus.PendingReview =>
-                ("Pending review", "Review Work"),
+                ("Pending review", "Review Work", null),
 
-            _ => (null, null)
+            _ => (null, null, null)
         };
     }
 
@@ -354,8 +423,13 @@ public class ProjectService : IProjectService
 
         return (status, guaranteeApp.Status) switch
         {
-            (ProjectStatus.Awarded, GuaranteeStatus.PendingBankReview) =>
+            // Same fix as BuildActiveListFields above: "ready for review"
+            // only applies once the bank has actually issued it.
+            (ProjectStatus.Awarded, GuaranteeStatus.Issued) =>
                 ("Guarantee: Ready for Review", "Bank has issued it", "WARNING"),
+
+            (ProjectStatus.Awarded, GuaranteeStatus.PendingBankReview) =>
+                ("Guarantee: Pending Bank Review", "Waiting on bank decision", "WARNING"),
 
             (ProjectStatus.InProgress, GuaranteeStatus.Approved) =>
                 ("Guarantee: Active", $"Expires {guaranteeApp.ValidityExpiry:MMM yyyy}", "SUCCESS"),
@@ -363,6 +437,22 @@ public class ProjectService : IProjectService
             _ => (null, null, null)
         };
     }
+
+    // Maps internal GuaranteeApplication.Status onto the same external
+    // vocabulary OwnerGuaranteeDto.Status uses (GuaranteeService's
+    // ExternalGuaranteeStatus) — kept as its own small copy here rather
+    // than reaching into GuaranteeService, same "each service maps its
+    // own status vocabulary" pattern BidStatusMapper already follows.
+    // Null in, null out — no guarantee application exists yet.
+    private static string? ExternalGuaranteeStatus(string? status) => status switch
+    {
+        null => null,
+        GuaranteeStatus.PendingBankReview => "PENDING_REVIEW",
+        GuaranteeStatus.Issued => "ISSUED",
+        GuaranteeStatus.Approved => "ACTIVE",
+        GuaranteeStatus.Rejected => "REJECTED",
+        _ => status.ToUpperInvariant(),
+    };
 
     // Project Detail's single guarantee row. Keeps the original "awaiting
     // issuance" fallback for when the contractor's confirmed but hasn't
@@ -372,9 +462,15 @@ public class ProjectService : IProjectService
     {
         if (status == ProjectStatus.Awarded && awardedBid?.Status == BidStatus.Confirmed)
         {
-            return guaranteeApp?.Status == GuaranteeStatus.PendingBankReview
-                ? "Ready for your review"
-                : "Awaiting guarantee issuance";
+            // Same fix as BuildActiveListFields/BuildGuaranteeStrip: "ready
+            // for your review" only applies once the bank has issued it —
+            // PendingBankReview means still waiting on the bank, not you.
+            return guaranteeApp?.Status switch
+            {
+                GuaranteeStatus.Issued => "Ready for your review",
+                GuaranteeStatus.PendingBankReview => "Pending bank review",
+                _ => "Awaiting guarantee issuance"
+            };
         }
 
         if (status == ProjectStatus.InProgress && guaranteeApp?.Status == GuaranteeStatus.Approved)

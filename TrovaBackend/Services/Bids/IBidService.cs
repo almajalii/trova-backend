@@ -20,4 +20,11 @@ public interface IBidService
     Task<List<MyBidItemDto>?> BackOffBidAsync(Guid contractorId, Guid bidId);
     Task<List<MyBidItemDto>?> CancelBidAsync(Guid contractorId, Guid bidId);
     Task<List<MyBidItemDto>?> MarkWorkDoneAsync(Guid contractorId, Guid bidId);
+
+    // GET /api/bids/{bidId}/company-profile. Owner-scoped: the caller must
+    // own the project this bid belongs to — null (-> 404) otherwise, same
+    // ownership pattern as everywhere else in this codebase. Every field
+    // on the returned DTO is always fully populated; see the doc comment
+    // on BidderCompanyProfileDto for why that matters here specifically.
+    Task<BidderCompanyProfileDto?> GetCompanyProfileAsync(Guid ownerId, Guid bidId);
 }
