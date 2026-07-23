@@ -4,15 +4,14 @@ namespace TrovaBackend.Services.BankConnection;
 // numbers per bank (same bank always produces the same demo snapshot, so
 // testing/demoing is consistent) rather than pure random noise on every call.
 //
-// TODO when/if real sandbox access exists: implement RealJofsDataProvider
-// against IJofsDataProvider —
+// See RealJofsDataProvider for the actual live implementation —
 //   AvailableBalanceAmount   <- GET /accounts/{accountAddress} -> availableBalance.amount
-//   NumberOfCurrentDebts     <- GET /institution/loans?loanStatus=active -> count(data)
 //   AverageMonthlyCashflowChangePercent <- GET /accounts/{accountId}/transactions,
 //     aggregate transactionAmount by month, compute % change
-// All three need Authorization + x-interactions-id + x-idempotency-key +
-// x-jws-signature headers. Swap the DI registration in Program.cs from this
-// class to the real one — nothing else changes.
+// NumberOfCurrentDebts is NOT generated here — it's self-reported on
+// ConnectBankRequest now, not part of the bank-verified snapshot. (Earlier
+// version of this comment assumed a JOFS Loans lookup for it; reading the
+// real Loans RAML disproved that — see IJofsDataProvider.cs.)
 public class MockJofsDataProvider : IJofsDataProvider
 {
     public Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(Guid userId, string bankCode)
@@ -72,7 +71,6 @@ public class MockJofsDataProvider : IJofsDataProvider
             AccountCurrency = "JOD",
             AccountStatus = status,
             AvailableBalanceAmount = balance,
-            NumberOfCurrentDebts = rng.Next(0, 4),
             AverageMonthlyCashflowChangePercent = rng.Next(-5, 10)
         };
 

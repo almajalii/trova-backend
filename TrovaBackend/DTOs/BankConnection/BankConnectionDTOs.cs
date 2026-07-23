@@ -45,10 +45,14 @@ public class BankOptionDto
 // need to display the bank name. Flag any mismatch with the actual Flutter
 // service and I'll adjust.
 //
-// RemainingDebtCapacityJod and NumberOfDelinquentDebts are self-reported —
-// captured here rather than via JOFS, since no JOFS service (Accounts,
-// Balances, or Loans) exposes either concept. See BankConnection.cs for
-// the full provenance breakdown.
+// RemainingDebtCapacityJod, NumberOfDelinquentDebts, and NumberOfCurrentDebts
+// are all self-reported — captured here rather than via JOFS, since no
+// JOFS service (Accounts, Balances, or Loans) exposes any of the three.
+// NumberOfCurrentDebts specifically: the real Loans RAML (RFC - Extended
+// Services - Loans v0.4.3) is a loan-origination/application workflow
+// scoped by financial institution, not a per-customer "list of existing
+// active loans" service — confirmed by reading it, not assumed. See
+// BankConnection.cs for the full provenance breakdown.
 public class ConnectBankRequest
 {
     [Required(ErrorMessage = "Bank code is required")]
@@ -61,6 +65,10 @@ public class ConnectBankRequest
     [Required(ErrorMessage = "Number of delinquent debts is required")]
     [Range(0, 1000, ErrorMessage = "Number of delinquent debts must be realistic")]
     public int NumberOfDelinquentDebts { get; set; }
+
+    [Required(ErrorMessage = "Number of current debts is required")]
+    [Range(0, 1000, ErrorMessage = "Number of current debts must be realistic")]
+    public int NumberOfCurrentDebts { get; set; }
 }
 
 public class ConnectBankResponse

@@ -43,12 +43,15 @@ public class BankConnectionService : IBankConnectionService
         connection.AccountCurrency = snapshot.AccountCurrency;
         connection.AccountStatus = snapshot.AccountStatus;
         connection.AvailableBalanceAmount = snapshot.AvailableBalanceAmount;
-        connection.NumberOfCurrentDebts = snapshot.NumberOfCurrentDebts;
         connection.AverageMonthlyCashflowChangePercent = snapshot.AverageMonthlyCashflowChangePercent;
 
-        // Self-reported — from the user, captured on this same screen
+        // Self-reported — from the user, captured on this same screen.
+        // NumberOfCurrentDebts joined this group after confirming no real
+        // JOFS Loans endpoint can answer "how many active debts does this
+        // customer have" — see BankConnection.cs for the full writeup.
         connection.RemainingDebtCapacityJod = request.RemainingDebtCapacityJod;
         connection.NumberOfDelinquentDebts = request.NumberOfDelinquentDebts;
+        connection.NumberOfCurrentDebts = request.NumberOfCurrentDebts;
 
         connection.LastSyncedAt = DateTime.UtcNow;
 

@@ -24,6 +24,14 @@ public class CapabilityScoreController : ControllerBase
     public async Task<IActionResult> Me()
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        // Recalculate-then-read — same pattern ProjectService.BuildBidderDtoAsync
+        // and BidService's company-profile endpoint already use. Without this,
+        // a contractor's own score view only reflected whatever was last saved
+        // by a bank (re)connect or by an owner happening to view their bid —
+        // finishing a project wouldn't show up here until one of those
+        // unrelated events also happened to fire.
+        await _capabilityScoreService.RecalculateAsync(userId);
         var result = await _capabilityScoreService.GetAsync(userId);
         return Ok(new ApiResponse<CapabilityScoreResponse>
         {

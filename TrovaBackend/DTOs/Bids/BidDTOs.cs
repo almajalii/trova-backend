@@ -63,13 +63,10 @@ public class BidHistoryItemDto
     // project (via LeaveReviewService.SubmitReviewAsync). Null for the
     // "completed but not yet reviewed" empty state — that's a real state,
     // not a gap, so it's left to the frontend to render accordingly.
-    public BidReviewDto? Review { get; set; }
-}
-
-public class BidReviewDto
-{
-    public int Stars { get; set; }
-    public string Comment { get; set; } = string.Empty;
+    // Flat, matching BidDetailDto's ReviewRating/ReviewText — the Flutter
+    // client reads both off the top level, not nested.
+    public int? ReviewRating { get; set; }
+    public string? ReviewText { get; set; }
 }
 
 // ── Bid Detail — GET /api/bids/{bidId} ───────────────────────────────────

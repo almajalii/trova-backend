@@ -35,9 +35,26 @@ builder.Services.AddScoped<TrovaBackend.Services.LeaveReview.ILeaveReviewService
 builder.Services.AddScoped<TrovaBackend.Services.CompanyProfile.ICompanyProfileService, TrovaBackend.Services.CompanyProfile.CompanyProfileService>();
 builder.Services.AddScoped<TrovaBackend.Services.Admin.IAdminService, TrovaBackend.Services.Admin.AdminService>();
 builder.Services.AddScoped<TrovaBackend.Services.Notifications.INotificationService, TrovaBackend.Services.Notifications.NotificationService>();
-// Bank connection — MockJofsDataProvider stands in for the real JOFS
-// sandbox client. Swap this one registration to go live later.
-builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();
+// Bank connection — driven by Jofs:UseMock in appsettings. Flip that flag
+// (plus BaseUrl/AuthorizationHeader/BankCustomerIds) once sandbox creds
+// are filled in — everything else in the codebase stays the same either way.
+builder.Services.Configure<TrovaBackend.Services.BankConnection.JofsApiOptions>(
+    builder.Configuration.GetSection("Jofs"));
+
+var jofsOptions = builder.Configuration.GetSection("Jofs").Get<TrovaBackend.Services.BankConnection.JofsApiOptions>()
+    ?? new TrovaBackend.Services.BankConnection.JofsApiOptions();
+
+if (jofsOptions.UseMock)
+{
+    builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();
+}
+else
+{
+    // No shared BaseAddress here — RealJofsDataProvider builds a full
+    // absolute URL per call since Accounts/Transactions/Loans each live
+    // on their own gateway path (see JofsApiOptions).
+    builder.Services.AddHttpClient<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.RealJofsDataProvider>();
+}
 builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IBankConnectionService, TrovaBackend.Services.BankConnection.BankConnectionService>();
 
 // Capability score

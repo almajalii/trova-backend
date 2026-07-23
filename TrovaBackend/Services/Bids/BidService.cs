@@ -84,8 +84,9 @@ public class BidService : IBidService
                 Note = b.Status == BidStatus.Completed ? null : b.Note,
                 // Present once the owner has actually left a review — the
                 // empty state (completed but not yet reviewed) is just
-                // Review == null, no separate flag needed.
-                Review = review != null ? new BidReviewDto { Stars = ComputeStars(review), Comment = review.Comment } : null
+                // both fields null, no separate flag needed.
+                ReviewRating = review != null ? ComputeStars(review) : null,
+                ReviewText = review?.Comment
             };
         }).ToList();
     }
@@ -108,8 +109,10 @@ public class BidService : IBidService
         return await GetMyBidsAsync(contractorId);
     }
 
-    // Legal from Selected, Confirmed, or InProgress. Project.AwardedBidId
-    // is deliberately left pointing at this bid rather than cleared — the
+    // Legal from Selected, Confirmed with no/rejected guarantee, or
+    // InProgress with no work submitted yet — mirrors exactly the four
+    // states the UI shows "Back Off" in. Project.AwardedBidId is
+    // deliberately left pointing at this bid rather than cleared — the
     // read-side subtitle/detailText logic ("{contractorName} backed off")
     // depends on being able to resolve the bid to get that name. Other
     // bids that were marked NotSelected at Award time are NOT reopened —
@@ -119,20 +122,50 @@ public class BidService : IBidService
         var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == bidId && b.ContractorId == contractorId);
         if (bid == null) return null;
 
-        var backoffableStatuses = new[] { BidStatus.PendingConfirmation, BidStatus.Confirmed, BidStatus.InProgress };
-        if (!backoffableStatuses.Contains(bid.Status))
+        // Matches exactly the four states the UI offers "Back Off" in —
+        // selected, confirmed (no guarantee application yet),
+        // guaranteeRejected (latest application rejected), and inProgress
+        // with no work submitted yet. Everything else (pending bank
+        // review, issued-awaiting-owner-confirm, work already submitted)
+        // gets a specific rejection message rather than a generic one.
+        GuaranteeApplication? latestGuaranteeApplication = null;
+
+        if (bid.Status == BidStatus.InProgress && bid.WorkSubmittedAt != null)
+            throw new InvalidOperationException("Work has already been submitted for this bid and can no longer be backed off.");
+
+        if (bid.Status == BidStatus.Confirmed)
+        {
+            latestGuaranteeApplication = await _db.GuaranteeApplications
+                .Where(g => g.BidId == bid.Id)
+                .OrderByDescending(g => g.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (latestGuaranteeApplication != null && latestGuaranteeApplication.Status == GuaranteeStatus.PendingBankReview)
+                throw new InvalidOperationException("This bid's guarantee is under bank review and can no longer be backed off.");
+            if (latestGuaranteeApplication != null && latestGuaranteeApplication.Status == GuaranteeStatus.Issued)
+                throw new InvalidOperationException("This bid's guarantee has been issued and can no longer be backed off.");
+            if (latestGuaranteeApplication != null && latestGuaranteeApplication.Status != GuaranteeStatus.Rejected)
+                throw new InvalidOperationException("This bid can no longer be backed off.");
+        }
+        else if (bid.Status != BidStatus.PendingConfirmation && bid.Status != BidStatus.InProgress)
+        {
             throw new InvalidOperationException("This bid can no longer be backed off.");
+        }
 
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == bid.ProjectId);
         if (project == null) return null;
 
-        // "After a guarantee rejection" is signalled by the project
-        // already sitting in GuaranteeRejectedByYou when the contractor
-        // backs off — that status exists in the schema but nothing sets
-        // it yet (guarantee flow isn't built in this pass).
-        bid.Note = project.Status == ProjectStatus.GuaranteeRejectedByYou
-            ? "You withdrew after the guarantee was rejected"
-            : "You backed off";
+        // Three distinct outcomes: the contractor never confirmed the
+        // award (this was a decline, not a withdrawal), withdrew after a
+        // guarantee rejection ("After a guarantee rejection" is signalled
+        // by the project already sitting in GuaranteeRejectedByYou — that
+        // status exists in the schema but nothing sets it yet, guarantee
+        // flow isn't built in this pass), or a plain back-off.
+        bid.Note = bid.Status == BidStatus.PendingConfirmation
+            ? "You declined the award"
+            : project.Status == ProjectStatus.GuaranteeRejectedByYou
+                ? "You withdrew after the guarantee was rejected"
+                : "You backed off";
         bid.Status = BidStatus.BackedOff;
         bid.UpdatedAt = DateTime.UtcNow;
 
@@ -505,7 +538,7 @@ public class BidService : IBidService
         _ => null
     };
 
-    // BidReviewDto.Stars is a single number; Review stores six separate
+    // ReviewRating is a single number; Review stores six separate
     // 1-5 categories (see leave_review_model.dart's ReviewCategory). This
     // is the average, rounded to the nearest whole star — WouldYouRehire
     // included, same as every other category, since the frontend rates

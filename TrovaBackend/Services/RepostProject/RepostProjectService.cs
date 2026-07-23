@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
 using TrovaBackend.DTOs.RepostProject;
@@ -39,8 +38,16 @@ public class RepostProjectService : IRepostProjectService
             Sector = project.Sector,
             ContractValueJod = project.ContractValueJod,
             MinRequiredScore = project.MinimumRequiredScore,
-            MinContractorClassification = ClassificationDisplayText(project.MinimumClassification),
+            MinContractorClassification = project.MinimumClassification,
             Description = project.Description,
+
+            Location = project.Location,
+            Currency = project.Currency,
+            TimelineText = project.TimelineText,
+            Milestones = project.Milestones,
+            GuaranteeTypeRequired = project.GuaranteeTypeRequired,
+            PaymentTerms = project.PaymentTerms,
+            BidSubmissionDeadline = project.BidSubmissionDeadline,
         };
     }
 
@@ -61,13 +68,9 @@ public class RepostProjectService : IRepostProjectService
             throw new ArgumentException("Contract value cannot be negative.");
         if (request.MinRequiredScore < 0 || request.MinRequiredScore > 100)
             throw new ArgumentException("Minimum required score must be between 0 and 100.");
+        if (request.BidSubmissionDeadline <= DateTime.UtcNow)
+            throw new ArgumentException("Bid submission deadline must be in the future.");
 
-        // Fields the repost form doesn't expose (location, timeline,
-        // milestones, guarantee type, payment terms) carry over unchanged
-        // from the original project — only the fields RepostProjectLayout
-        // actually renders are editable here. Bid submission deadline
-        // isn't collected either; defaulting to 14 days out, same as a
-        // reasonable fresh posting window.
         var newProject = new Project
         {
             OwnerId = ownerId,
@@ -75,22 +78,22 @@ public class RepostProjectService : IRepostProjectService
 
             Title = request.Title.Trim(),
             Sector = request.Sector.Trim(),
-            Location = original.Location,
+            Location = request.Location.Trim(),
 
             ContractValueJod = request.ContractValueJod,
-            Currency = original.Currency,
+            Currency = request.Currency.Trim().ToUpperInvariant(),
 
-            TimelineText = original.TimelineText,
-            Milestones = original.Milestones,
+            TimelineText = request.TimelineText.Trim(),
+            Milestones = request.Milestones.Trim(),
 
-            GuaranteeTypeRequired = original.GuaranteeTypeRequired,
-            PaymentTerms = original.PaymentTerms,
+            GuaranteeTypeRequired = request.GuaranteeTypeRequired.Trim(),
+            PaymentTerms = request.PaymentTerms.Trim(),
             Description = request.Description.Trim(),
 
             MinimumRequiredScore = request.MinRequiredScore,
-            MinimumClassification = ExtractClassificationCode(request.MinContractorClassification),
+            MinimumClassification = ValidateClassificationCode(request.MinContractorClassification),
 
-            BidSubmissionDeadline = DateTime.UtcNow.AddDays(14),
+            BidSubmissionDeadline = DateTime.SpecifyKind(request.BidSubmissionDeadline, DateTimeKind.Utc),
             Status = ProjectStatus.OpenForBids,
         };
 
@@ -123,33 +126,16 @@ public class RepostProjectService : IRepostProjectService
         return user?.Name ?? "Unknown";
     }
 
-    // "A" -> "Class A or higher" — best-effort reconstruction of the
-    // free-text field the repost form actually edits, seeded from the
-    // bare code Post Project itself stores. Not stored anywhere; only
-    // ever shown as the draft's starting text.
-    private static string ClassificationDisplayText(string code) => code.Trim().ToUpperInvariant() switch
+    // Bare "A" | "B" | "C" only, same rule as PostProjectRequest's
+    // [RegularExpression("^(A|B|C)$")] — the repost form is a fixed
+    // A/B/C enum now, no free-text reconstruction needed.
+    private static string ValidateClassificationCode(string raw)
     {
-        "A" => "Class A or higher (Large)",
-        "B" => "Class B or higher (Medium+)",
-        "C" => "Class C or higher (Small+)",
-        _ => code,
-    };
+        var trimmed = raw.Trim().ToUpperInvariant();
+        if (trimmed is "A" or "B" or "C")
+            return trimmed;
 
-    // Reverse direction: pulls a bare A/B/C back out of whatever the
-    // owner left in the free-text classification field, since
-    // Project.MinimumClassification stores just the code. Accepts either
-    // a bare letter or a "Class X ..." phrase.
-    private static string ExtractClassificationCode(string raw)
-    {
-        var trimmed = raw.Trim();
-        if (trimmed.Length == 1 && "ABCabc".Contains(trimmed))
-            return trimmed.ToUpperInvariant();
-
-        var match = Regex.Match(trimmed, @"Class\s+(A|B|C)", RegexOptions.IgnoreCase);
-        if (match.Success)
-            return match.Groups[1].Value.ToUpperInvariant();
-
-        throw new ArgumentException("minContractorClassification must be 'A', 'B', 'C', or a phrase like 'Class B or higher'.");
+        throw new ArgumentException("Minimum classification must be 'A', 'B', or 'C'.");
     }
 
     private async Task<string> GenerateUniqueProjectCodeAsync()

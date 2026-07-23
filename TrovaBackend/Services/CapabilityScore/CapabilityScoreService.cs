@@ -54,7 +54,7 @@ public class CapabilityScoreService : ICapabilityScoreService
         else
         {
             currentDebtsScore = Clamp0To100(100 - (bank.NumberOfCurrentDebts * 8));
-            currentDebtsDesc = $"{bank.NumberOfCurrentDebts} current debt(s)";
+            currentDebtsDesc = $"{bank.NumberOfCurrentDebts} current debt(s) (self-reported)";
 
             debtCapacityScore = _options.RecommendedMaxDebtCapacityJod > 0
                 ? Clamp0To100((int)Math.Round(100m * bank.RemainingDebtCapacityJod / _options.RecommendedMaxDebtCapacityJod))

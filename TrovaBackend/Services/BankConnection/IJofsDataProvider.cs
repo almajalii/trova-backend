@@ -7,9 +7,13 @@ namespace TrovaBackend.Services.BankConnection;
 // the mock, and nothing else in the codebase changes.
 //
 // Only includes fields confirmed mappable to real JOFS schemas (Accounts,
-// Loans, Transactions) — delinquency and debt capacity are NOT here since
-// no JOFS service exposes either concept; those are captured as
-// self-reported input instead (see BankConnection.cs and ConnectBankRequest).
+// Transactions). NumberOfCurrentDebts is deliberately NOT here — the real
+// Loans RAML (RFC - Extended Services - Loans v0.4.3) turned out to be a
+// loan-origination/application workflow scoped by financial institution,
+// not a per-customer "list of existing active loans" service, so it can't
+// answer this. Delinquency, debt capacity, and current debts are all
+// captured as self-reported input instead (see BankConnection.cs and
+// ConnectBankRequest).
 public interface IJofsDataProvider
 {
     Task<JofsAccountSnapshot> FetchAccountSnapshotAsync(Guid userId, string bankCode);
@@ -21,10 +25,6 @@ public class JofsAccountSnapshot
     public string AccountCurrency { get; set; } = "JOD";
     public string AccountStatus { get; set; } = "active";
     public decimal AvailableBalanceAmount { get; set; }
-
-    // Maps to: count of JOFS Loans where loanStatus == "active"
-    // (GET /institution/loans?loanStatus=active — confirmed real field)
-    public int NumberOfCurrentDebts { get; set; }
 
     // Maps to: aggregated JOFS Transactions over a rolling window
     // (GET /accounts/{accountId}/transactions — confirmed real field)
