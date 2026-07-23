@@ -40,8 +40,20 @@ public class CompanyDetails
     // Sectors field
     public List<string> Sectors { get; set; } = new();
 
+    public int YearsOfExperience { get; set; }
     public int TeamSize { get; set; }
     public decimal AnnualRevenueJod { get; set; }
+
+    // ── Banking basics ──────────────────────────────────────────────────
+    // Self-reported at company-details submission time — distinct from the
+    // separate BankConnection/JOFS flow (Connect Bank), which is a later,
+    // optional step and covers different fields (balances, debts, etc).
+    // These four were previously accepted by CompanyDetailsDraftDto but
+    // silently dropped; now persisted for real, matching the Dart contract.
+    public string PrimaryBankName { get; set; } = string.Empty;
+    public string IbanNumber { get; set; } = string.Empty;
+    public string SwiftBicCode { get; set; } = string.Empty;
+    public string BankBranchNameCity { get; set; } = string.Empty;
 
     // Classification
     public string ClassificationCode { get; set; } = string.Empty;

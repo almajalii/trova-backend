@@ -150,7 +150,11 @@ public class ProjectService : IProjectService
             // the awarded contractor's name where we have one.
             string? detailText = p.Status switch
             {
+                ProjectStatus.Completed when p.DisputeResolvedAt.HasValue
+                    => $"Dispute resolved {p.DisputeResolvedAt.Value:MMMM yyyy}",
                 ProjectStatus.Completed => $"Completed {p.UpdatedAt:MMMM yyyy}",
+                ProjectStatus.Disputed when p.DisputeReason != null
+                    => p.DisputeReason,
                 ProjectStatus.Disputed or ProjectStatus.Failed when contractorName != null
                     => $"Contractor: {contractorName}",
                 ProjectStatus.Cancelled => $"Reposted {p.UpdatedAt:MMMM yyyy}",
@@ -227,7 +231,7 @@ public class ProjectService : IProjectService
             Title = project.Title,
             Status = project.Status.ToUpperInvariant(),
             StatusLabel = statusLabel,
-            Subtitle = BuildSubtitle(project.Status, contractorName),
+            Subtitle = BuildSubtitle(project, contractorName),
             AwardedBidder = BuildAwardedBidder(awardedBid, contractorName, classification),
             Sector = project.Sector,
             ContractValueJod = project.ContractValueJod,
@@ -495,11 +499,26 @@ public class ProjectService : IProjectService
             _ => (status, null, false)
         };
 
-    private static string? BuildSubtitle(string status, string? contractorName)
+    private static string? BuildSubtitle(Project project, string? contractorName)
     {
+        // Disputed and resolved-from-a-dispute projects have real text to
+        // show regardless of whether a contractor is attached — everything
+        // else here still requires one, same as before.
+        if (project.Status == ProjectStatus.Disputed)
+        {
+            return project.DisputeReason != null
+                ? $"You flagged this project's submitted work: {project.DisputeReason}"
+                : "This project has been disputed and is under review.";
+        }
+
+        if (project.Status == ProjectStatus.Completed && project.DisputeResolvedAt.HasValue)
+        {
+            return $"Dispute resolved: {project.DisputeResolutionMessage}";
+        }
+
         if (contractorName == null) return null;
 
-        return status switch
+        return project.Status switch
         {
             ProjectStatus.ContractorBackedOff => $"{contractorName} backed off",
             ProjectStatus.GuaranteeRejectedByYou => $"Guarantee rejected — {contractorName}",
@@ -579,15 +598,46 @@ public class ProjectService : IProjectService
                 };
 
             case ProjectStatus.Completed:
-                return new List<TimelineStepDto>
+                var completedSteps = new List<TimelineStepDto>
                 {
                     posted,
                     Step("Awarded (Contract Signed)", "DONE"),
                     Step("Guarantee Active", "DONE"),
                     Step("In Progress", "DONE"),
                     Step("Pending Review", "DONE"),
-                    new TimelineStepDto { Label = "Completed", Date = project.UpdatedAt.ToString("yyyy-MM-dd"), State = "DONE" },
                 };
+
+                // Resolved-dispute projects get an extra step showing that
+                // happened, instead of looking identical to a project that
+                // was never disputed — DisputeRaisedAt/DisputeResolvedAt
+                // are the only record of this (no ProjectStatusHistory
+                // table), so use them directly.
+                if (project.DisputeRaisedAt.HasValue)
+                {
+                    completedSteps.Add(new TimelineStepDto
+                    {
+                        Label = "Disputed",
+                        Date = project.DisputeRaisedAt.Value.ToString("yyyy-MM-dd"),
+                        State = "DONE"
+                    });
+                    completedSteps.Add(new TimelineStepDto
+                    {
+                        Label = "Dispute Resolved",
+                        Date = project.DisputeResolvedAt?.ToString("yyyy-MM-dd"),
+                        State = "DONE"
+                    });
+                }
+                else
+                {
+                    completedSteps.Add(new TimelineStepDto
+                    {
+                        Label = "Completed",
+                        Date = project.UpdatedAt.ToString("yyyy-MM-dd"),
+                        State = "DONE"
+                    });
+                }
+
+                return completedSteps;
 
             case ProjectStatus.Disputed:
                 return new List<TimelineStepDto>

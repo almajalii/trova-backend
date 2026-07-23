@@ -1,6 +1,16 @@
+using System.ComponentModel.DataAnnotations;
 using TrovaBackend.DTOs.Common;
 
 namespace TrovaBackend.DTOs.ReviewWork;
+
+// POST /api/projects/{projectId}/flag-issue body — the owner's explanation
+// for disputing the contractor's "done" claim. Shown to the admin
+// resolving the dispute.
+public class FlagIssueRequest
+{
+    [Required(ErrorMessage = "A reason is required to flag an issue.")]
+    public string Reason { get; set; } = string.Empty;
+}
 
 // ── Submitted Work — GET /api/projects/{projectId}/submitted-work ──────────
 // Owner-facing; only meaningful while the project's status is

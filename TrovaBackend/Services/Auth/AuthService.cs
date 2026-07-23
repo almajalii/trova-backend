@@ -46,6 +46,9 @@ public class AuthService : IAuthService
             Phone = request.Phone.Trim(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = "user",
+            // Every new signup needs admin sign-off before they can use the
+            // app — see UserApprovalStatus / ApprovalGateFilter.
+            ApprovalStatus = UserApprovalStatus.Pending,
         };
 
         _db.Users.Add(user);
@@ -215,5 +218,7 @@ public class AuthService : IAuthService
         Email = user.Email,
         Phone = user.Phone,
         Role = user.Role,
+        ApprovalStatus = user.ApprovalStatus,
+        RejectionReason = user.RejectionReason,
     };
 }

@@ -90,16 +90,18 @@ public class ReviewWorkService : IReviewWorkService
         await _db.SaveChangesAsync();
     }
 
-    public async Task FlagIssueAsync(Guid ownerId, string projectId)
+    public async Task FlagIssueAsync(Guid ownerId, string projectId, string reason)
     {
         var project = await ResolvePendingReviewProjectAsync(ownerId, projectId);
 
         // Bid.Status is deliberately left as InProgress — there's no
         // dedicated "disputed" bid state (same reasoning as
         // GuaranteeService.RejectAsync only flipping Project, not Bid).
-        // Trova's back-office process is what resolves a dispute, not
-        // anything modelled in this codebase yet.
+        // Trova's back-office process is what resolves a dispute — see
+        // AdminService.ResolveDisputeAsync.
         project.Status = ProjectStatus.Disputed;
+        project.DisputeReason = reason;
+        project.DisputeRaisedAt = DateTime.UtcNow;
         project.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();

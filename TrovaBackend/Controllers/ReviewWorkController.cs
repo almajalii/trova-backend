@@ -64,10 +64,10 @@ public class ReviewWorkController : ControllerBase
 
     // POST /api/projects/{projectId}/flag-issue
     [HttpPost("{projectId}/flag-issue")]
-    public async Task<IActionResult> FlagIssue(string projectId)
+    public async Task<IActionResult> FlagIssue(string projectId, [FromBody] FlagIssueRequest request)
     {
         var ownerId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        await _reviewWorkService.FlagIssueAsync(ownerId, projectId);
+        await _reviewWorkService.FlagIssueAsync(ownerId, projectId, request.Reason);
         return Ok(new ApiResponse<object?>
         {
             Success = true,

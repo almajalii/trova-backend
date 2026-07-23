@@ -112,4 +112,10 @@ public class UserDto
     public string Email { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string Role { get; set; } = string.Empty;
+
+    // "pending" | "approved" | "rejected" — the app should route pending/
+    // rejected users to a status screen instead of the dashboard even
+    // though login itself succeeds (see AuthService.LoginAsync comment).
+    public string ApprovalStatus { get; set; } = string.Empty;
+    public string? RejectionReason { get; set; } // set only when ApprovalStatus == "rejected"
 }

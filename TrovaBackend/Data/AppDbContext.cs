@@ -24,6 +24,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasIndex(u => u.Email).IsUnique();
+
+            // Admin's pending-users queue filters on this.
+            entity.HasIndex(u => u.ApprovalStatus);
         });
 
         modelBuilder.Entity<Models.CompanyDetails>(entity =>

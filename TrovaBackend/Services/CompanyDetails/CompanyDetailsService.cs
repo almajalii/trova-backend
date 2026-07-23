@@ -24,15 +24,6 @@ namespace TrovaBackend.Services
 
         // Upsert against the real CompanyDetails table — one row per user,
         // same pattern as BankConnection/CapabilityScore (HasIndex(UserId).IsUnique()).
-        //
-        // NOTE: CompanyDetailsDraftDto still carries YearsOfExperience,
-        // PrimaryBankName, IbanNumber, SwiftBicCode, BankBranchNameCity —
-        // fields the real Models.CompanyDetails entity doesn't have columns
-        // for (bank data lives in the separate, real BankConnection table
-        // via the JOFS flow instead). Those fields are accepted from the
-        // client but not persisted here. Flagging rather than silently
-        // dropping: if the frontend actually depends on reading them back,
-        // that needs a migration + a decision on where they belong.
         public async Task<ScoreClassificationDto> SubmitCompanyDetailsAsync(string userId, CompanyDetailsDraftDto draft)
         {
             var userGuid = Guid.Parse(userId);
@@ -56,14 +47,22 @@ namespace TrovaBackend.Services
             entity.BusinessLicenseNumber = draft.BusinessLicenseNumber;
             entity.ContractorClassificationGrade = draft.ContractorClassificationGrade;
             entity.Sectors = draft.Sectors;
+            entity.YearsOfExperience = draft.YearsOfExperience;
             entity.TeamSize = draft.TeamSize;
             entity.AnnualRevenueJod = draft.AnnualRevenueJod;
+            entity.PrimaryBankName = draft.PrimaryBankName;
+            entity.IbanNumber = draft.IbanNumber;
+            entity.SwiftBicCode = draft.SwiftBicCode;
+            entity.BankBranchNameCity = draft.BankBranchNameCity;
             entity.UpdatedAt = DateTime.UtcNow;
 
-            // Years in operation derived from YearOfEstablishment rather than
-            // trusting the client-submitted YearsOfExperience — same
-            // "don't trust a client-supplied flag" principle used for Bid
-            // eligibility elsewhere.
+            // Classification still keys off years *in operation*
+            // (YearOfEstablishment-derived), not the self-reported
+            // YearsOfExperience — same "don't trust a client-submitted
+            // number for a scoring input" principle used for Bid
+            // eligibility elsewhere. YearsOfExperience itself is now stored
+            // and read back as-submitted (it's informational, shown to
+            // admins/other users, not fed into the formula).
             var yearsInOperation = DateTime.UtcNow.Year - draft.YearOfEstablishment;
             var classification = CalculateClassification(draft.TeamSize, draft.AnnualRevenueJod, yearsInOperation);
 
@@ -101,17 +100,13 @@ namespace TrovaBackend.Services
                 BusinessLicenseNumber = entity.BusinessLicenseNumber,
                 ContractorClassificationGrade = entity.ContractorClassificationGrade,
                 Sectors = entity.Sectors,
-                // Derived, not stored — see NOTE above.
-                YearsOfExperience = DateTime.UtcNow.Year - entity.YearOfEstablishment,
+                YearsOfExperience = entity.YearsOfExperience,
                 TeamSize = entity.TeamSize,
                 AnnualRevenueJod = entity.AnnualRevenueJod,
-                // Not modelled on Models.CompanyDetails — bank data belongs
-                // to the real BankConnection table. Left blank rather than
-                // fabricated.
-                PrimaryBankName = string.Empty,
-                IbanNumber = string.Empty,
-                SwiftBicCode = string.Empty,
-                BankBranchNameCity = string.Empty,
+                PrimaryBankName = entity.PrimaryBankName,
+                IbanNumber = entity.IbanNumber,
+                SwiftBicCode = entity.SwiftBicCode,
+                BankBranchNameCity = entity.BankBranchNameCity,
                 Classification = new ScoreClassificationDto
                 {
                     Code = entity.ClassificationCode,

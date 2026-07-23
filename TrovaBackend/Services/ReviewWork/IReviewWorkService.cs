@@ -11,5 +11,8 @@ public interface IReviewWorkService
     // Both throw KeyNotFoundException if the project isn't the caller's,
     // and InvalidOperationException if it isn't in PendingReview.
     Task ConfirmCompleteAsync(Guid ownerId, string projectId);
-    Task FlagIssueAsync(Guid ownerId, string projectId);
+
+    // reason is the owner's explanation for disputing the work — stored on
+    // Project.DisputeReason, shown to the admin resolving it.
+    Task FlagIssueAsync(Guid ownerId, string projectId, string reason);
 }

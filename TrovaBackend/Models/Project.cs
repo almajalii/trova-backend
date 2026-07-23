@@ -74,4 +74,23 @@ public class Project
     // work complete). GET /projects/{id}/submitted-work reads off this —
     // that endpoint isn't built in this pass, but this is its trigger.
     public DateTime? SubmittedDate { get; set; }
+
+    // ── Dispute (admin back-office) ─────────────────────────────────────
+    // Set by ReviewWorkService.FlagIssueAsync alongside Status -> Disputed;
+    // this is the owner's explanation for rejecting the contractor's
+    // "done" claim. Cleared is never needed — a project only ever disputes
+    // once in this pass (no re-dispute flow).
+    public string? DisputeReason { get; set; }
+
+    // Fixed at the moment the dispute was raised — kept separate from
+    // UpdatedAt because UpdatedAt moves again the moment the dispute is
+    // resolved, and the admin disputes list needs "raised on" to stay put.
+    public DateTime? DisputeRaisedAt { get; set; }
+
+    // Set by AdminService.ResolveDisputeAsync alongside Status -> Completed
+    // (resolution is always a single outcome for this pass — see the
+    // confirmed decision not to add a Completed/Failed picker). Sent to
+    // both parties by email.
+    public string? DisputeResolutionMessage { get; set; }
+    public DateTime? DisputeResolvedAt { get; set; }
 }

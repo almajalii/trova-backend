@@ -33,6 +33,7 @@ builder.Services.AddScoped<TrovaBackend.Services.ReviewWork.IReviewWorkService, 
 builder.Services.AddScoped<TrovaBackend.Services.RepostProject.IRepostProjectService, TrovaBackend.Services.RepostProject.RepostProjectService>();
 builder.Services.AddScoped<TrovaBackend.Services.LeaveReview.ILeaveReviewService, TrovaBackend.Services.LeaveReview.LeaveReviewService>();
 builder.Services.AddScoped<TrovaBackend.Services.CompanyProfile.ICompanyProfileService, TrovaBackend.Services.CompanyProfile.CompanyProfileService>();
+builder.Services.AddScoped<TrovaBackend.Services.Admin.IAdminService, TrovaBackend.Services.Admin.AdminService>();
 // Bank connection — MockJofsDataProvider stands in for the real JOFS
 // sandbox client. Swap this one registration to go live later.
 builder.Services.AddScoped<TrovaBackend.Services.BankConnection.IJofsDataProvider, TrovaBackend.Services.BankConnection.MockJofsDataProvider>();
@@ -67,7 +68,12 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 // Controllers
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Blocks non-approved users from every endpoint except the ones that
+    // have to work pre-approval â€” see ApprovalGateFilter for the full list.
+    options.Filters.Add<TrovaBackend.Middleware.ApprovalGateFilter>();
+});
 
 // CORS - wide open for now since frontend origin isn't known yet.
 // Tighten this once the frontend domain is finalized.
