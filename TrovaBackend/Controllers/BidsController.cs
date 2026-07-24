@@ -147,6 +147,34 @@ public class BidsController : ControllerBase
         });
     }
 
+    // GET /api/bids/{bidId}/owner-profile
+    // Contractor-facing — reverse of company-profile. Scoped to the
+    // contractor who placed the bid; a bid that exists but belongs to
+    // someone else 404s the same as a nonexistent one.
+    [HttpGet("{bidId}/owner-profile")]
+    public async Task<IActionResult> OwnerProfile(Guid bidId)
+    {
+        var contractorId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var result = await _bidService.GetOwnerProfileAsync(contractorId, bidId);
+
+        if (result == null)
+        {
+            return NotFound(new ApiResponse<OwnerProfileDto?>
+            {
+                Success = false,
+                Message = "Bid not found.",
+                Data = null
+            });
+        }
+
+        return Ok(new ApiResponse<OwnerProfileDto>
+        {
+            Success = true,
+            Message = "Owner profile retrieved successfully.",
+            Data = result
+        });
+    }
+
     private IActionResult RespondWithList(List<MyBidItemDto>? result, string successMessage)
     {
         if (result == null)

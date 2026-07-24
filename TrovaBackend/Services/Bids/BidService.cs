@@ -375,7 +375,24 @@ public class BidService : IBidService
         };
     }
 
-    // Four-stage timeline covering the happy path (Submitted -> Selected
+    // GET /api/bids/{bidId}/owner-profile. Contractor-scoped through the
+    // bid itself (not the project) — the caller viewing a project owner's
+    // profile must be the contractor who placed this specific bid, never
+    // some other contractor browsing the same project. A bid that exists
+    // but was placed by someone else 404s the same as a nonexistent bid,
+    // mirroring GetCompanyProfileAsync's ownership pattern in reverse.
+    public async Task<OwnerProfileDto?> GetOwnerProfileAsync(Guid contractorId, Guid bidId)
+    {
+        var bid = await _db.Bids.FirstOrDefaultAsync(b => b.Id == bidId && b.ContractorId == contractorId);
+        if (bid == null) return null;
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == bid.ProjectId);
+        if (project == null) return null;
+
+        return await OwnerProfileHelper.BuildAsync(_db, project.OwnerId);
+    }
+
+
     // -> Guarantee -> Complete). Doesn't have a dedicated stage for
     // BackedOff/BACKED_OFF — that status isn't in the frontend's handled
     // enum for this screen, so it's not clear what that screen wants

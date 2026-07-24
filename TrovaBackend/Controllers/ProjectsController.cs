@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TrovaBackend.DTOs.Bids;
 using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.Projects;
 using TrovaBackend.Services.Projects;
@@ -204,6 +205,33 @@ public class ProjectsController : ControllerBase
         {
             Success = true,
             Message = "Bid submitted successfully.",
+            Data = result
+        });
+    }
+
+    // GET /api/projects/{projectId}/owner-profile
+    // Pre-bid version of GET /bids/{bidId}/owner-profile, for the
+    // browse/Submit Bid screen. Any authenticated contractor can view it
+    // as long as the project is still open — no bid needs to exist yet.
+    [HttpGet("{projectId}/owner-profile")]
+    public async Task<IActionResult> OwnerProfileByProject(string projectId)
+    {
+        var result = await _projectService.GetOwnerProfileByProjectAsync(projectId);
+
+        if (result == null)
+        {
+            return NotFound(new ApiResponse<OwnerProfileDto?>
+            {
+                Success = false,
+                Message = "Project not found or no longer open for bids.",
+                Data = null
+            });
+        }
+
+        return Ok(new ApiResponse<OwnerProfileDto>
+        {
+            Success = true,
+            Message = "Owner profile retrieved successfully.",
             Data = result
         });
     }

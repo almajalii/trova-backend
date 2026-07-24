@@ -27,4 +27,10 @@ public interface IBidService
     // on the returned DTO is always fully populated; see the doc comment
     // on BidderCompanyProfileDto for why that matters here specifically.
     Task<BidderCompanyProfileDto?> GetCompanyProfileAsync(Guid ownerId, Guid bidId);
+
+    // GET /api/bids/{bidId}/owner-profile. Reverse of GetCompanyProfileAsync:
+    // contractor-scoped — the caller must be the contractor who placed this
+    // bid — null (-> 404) otherwise, same ownership pattern as everywhere
+    // else in this file.
+    Task<OwnerProfileDto?> GetOwnerProfileAsync(Guid contractorId, Guid bidId);
 }

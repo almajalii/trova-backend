@@ -21,13 +21,24 @@ public class BankConnectionController : ControllerBase
 
     // GET /api/bank-connection/banks
     // Lets the frontend render the bank picker from real data instead of
-    // hardcoding the 11 bank codes/names on its own — single source of
-    // truth stays TrovaBanks.DisplayNames.
+    // hardcoding bank codes/names on its own. Full source of truth for
+    // valid bank codes stays TrovaBanks.DisplayNames (still used as-is by
+    // BankConnectionService.ConnectAsync for validation) - this endpoint
+    // deliberately only surfaces a curated subset of it for the picker,
+    // currently Housing Bank / Capital Bank / Jordan Kuwait Bank. Update
+    // EnabledBankCodes below to change which banks show up here; codes
+    // removed from this list still work if a client somehow sends them to
+    // /connect directly, they just won't be offered in the picker.
+    private static readonly string[] EnabledBankCodes =
+    {
+        TrovaBanks.HousingBank, TrovaBanks.CapitalBank, TrovaBanks.JordanKuwaitBank
+    };
+
     [HttpGet("banks")]
     public IActionResult GetAvailableBanks()
     {
-        var banks = TrovaBanks.DisplayNames
-            .Select(kv => new BankOptionDto { Code = kv.Key, Name = kv.Value })
+        var banks = EnabledBankCodes
+            .Select(code => new BankOptionDto { Code = code, Name = TrovaBanks.DisplayNames[code] })
             .ToList();
 
         return Ok(new ApiResponse<List<BankOptionDto>>

@@ -1,10 +1,12 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using TrovaBackend.Data;
+using TrovaBackend.DTOs.Bids;
 using TrovaBackend.DTOs.Common;
 using TrovaBackend.DTOs.Projects;
 using TrovaBackend.Models;
 using TrovaBackend.Services.CapabilityScore;
 using TrovaBackend.Services.Notifications;
+using TrovaBackend.Services.Shared;
 
 namespace TrovaBackend.Services.Projects;
 
@@ -708,11 +710,13 @@ public class ProjectService : IProjectService
         if (winningBid == null)
             throw new InvalidOperationException("This bid does not belong to this project.");
 
-        // Re-validate eligibility server-side — never trust a client-supplied
-        // eligible flag, and this also gates whether Award can succeed at all.
+        // No eligibility gate here anymore — SubmitBidAsync already enforces
+        // the minimum score/classification at submission time, so every bid
+        // on this project is guaranteed eligible by the time it reaches
+        // Award. BuildBidderDtoAsync is still used purely to get the
+        // company name for the response; its Eligible field is informational
+        // only now (shown on the Compare Bidders screen), not enforced.
         var bidder = await BuildBidderDtoAsync(winningBid, project);
-        if (!bidder.Eligible)
-            throw new InvalidOperationException("This bid does not meet the project's minimum score/classification requirements.");
 
         project.Status = ProjectStatus.Awarded;
         project.AwardedBidId = winningBid.Id;
@@ -878,12 +882,23 @@ public class ProjectService : IProjectService
         if (alreadyBid)
             throw new InvalidOperationException("You have already submitted a bid for this project.");
 
-        // Eligibility is deliberately NOT enforced here — the Submit Bid
-        // screen's own disclaimer says the score becomes visible to the
-        // owner for evaluation, not that it gates submission. The hard
-        // eligibility gate lives at Award time (AwardProjectAsync), where
-        // it's re-validated server-side regardless of what this bid looked
-        // like when submitted.
+        // Eligibility gate — a contractor can't submit a bid unless their
+        // capability score and classification both clear the project's
+        // minimums. Uses the same rule-based score engine and
+        // ClassificationRank comparison as the owner-side bidder list /
+        // Award re-validation (BuildBidderDtoAsync), so "eligible" never
+        // drifts between submission time and award time.
+        await _capabilityScoreService.RecalculateAsync(contractorId);
+        var score = await _capabilityScoreService.GetAsync(contractorId);
+        var company = await _db.CompanyDetails.FirstOrDefaultAsync(c => c.UserId == contractorId);
+        var classificationCode = company?.ClassificationCode ?? string.Empty;
+
+        var eligible = score.OverallScore >= project.MinimumRequiredScore
+            && ClassificationRank(classificationCode) >= ClassificationRank(project.MinimumClassification);
+
+        if (!eligible)
+            throw new InvalidOperationException("You do not meet this project's minimum score/classification requirements.");
+
         var bid = new Bid
         {
             ProjectId = project.Id,
@@ -915,6 +930,23 @@ public class ProjectService : IProjectService
             ProjectId = project.ProjectCode,
             Status = bid.Status.ToUpperInvariant()
         };
+    }
+
+    // GET /api/projects/{projectId}/owner-profile. Pre-bid lookup for the
+    // browse/Submit Bid screen — no Bid row exists yet to scope through,
+    // so this scopes by the project's own visibility instead: any
+    // authenticated contractor can view it as long as the project is
+    // still OpenForBids, same rule BrowseProjectsAsync/
+    // GetBrowseProjectDetailAsync already use. Delegates the actual DTO
+    // build to OwnerProfileHelper so the numbers here can never drift from
+    // BidService.GetOwnerProfileAsync's bid-scoped version.
+    public async Task<OwnerProfileDto?> GetOwnerProfileByProjectAsync(string projectId)
+    {
+        var project = await _db.Projects
+            .FirstOrDefaultAsync(p => p.ProjectCode == projectId && p.Status == ProjectStatus.OpenForBids);
+        if (project == null) return null;
+
+        return await OwnerProfileHelper.BuildAsync(_db, project.OwnerId);
     }
 
     private static string BuildDaysLeftText(DateTime deadlineUtc)
